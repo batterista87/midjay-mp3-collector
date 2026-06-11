@@ -1,0 +1,25 @@
+# === Eclipse ===
+.classpath
+.project
+.settings/
+
+# === Build directories ===
+bin/
+target/
+
+# === Java ===
+*.class
+
+# === OS files ===
+.DS_Store
+Thumbs.db
+
+# === Temporary files ===
+*.log
+*.tmp
+*.bak
+*.swp
+
+# === IDE ===
+*.iml
+.idea/

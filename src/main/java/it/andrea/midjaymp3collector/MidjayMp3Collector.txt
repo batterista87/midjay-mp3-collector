@@ -1,0 +1,457 @@
+package it.andrea.midjaymp3collector;
+
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.net.URL;
+import java.nio.file.FileVisitResult;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.SimpleFileVisitor;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.BasicFileAttributes;
+import java.util.Properties;
+import java.util.concurrent.atomic.AtomicInteger;
+
+import javafx.application.Application;
+import javafx.application.Platform;
+import javafx.concurrent.Task;
+import javafx.geometry.Insets;
+import javafx.geometry.Pos;
+import javafx.scene.Scene;
+import javafx.scene.control.Alert;
+import javafx.scene.control.Button;
+import javafx.scene.control.CheckBox;
+import javafx.scene.control.Label;
+import javafx.scene.control.ProgressBar;
+import javafx.scene.control.TextField;
+import javafx.scene.layout.ColumnConstraints;
+import javafx.scene.layout.GridPane;
+import javafx.scene.layout.HBox;
+import javafx.scene.layout.Priority;
+import javafx.scene.layout.VBox;
+import javafx.stage.DirectoryChooser;
+import javafx.stage.Stage;
+
+public class MidjayMp3Collector extends Application {
+
+    private TextField sourceField;
+    private TextField targetField;
+    private CheckBox cleanCheck;
+    private Button startButton;
+    private Button cancelButton;
+    private ProgressBar progressBar;
+    private Label statusLabel;
+    Label progressText;
+    private CheckBox lyricsOnlyCheck;
+    private CheckBox noLyricsOnlyCheck;
+
+    private Task<Void> worker;
+
+    public static void main(String[] args) {
+        launch(args);
+    }
+
+    @Override
+    public void start(Stage stage) {
+        stage.setTitle("Midjay MP3 Collector");
+
+        sourceField = new TextField();
+        targetField = new TextField();
+        cleanCheck = new CheckBox("PULISCI DESTINAZIONE (rimuove .mp3 extra)");
+        lyricsOnlyCheck = new CheckBox("COPIA SOLO FILE CON LYRICSBEGIN");
+        noLyricsOnlyCheck = new CheckBox("COPIA SOLO FILE SENZA LYRICSBEGIN");
+
+        Button browseSource = new Button("[...]");
+        browseSource.setOnAction(e -> chooseDirectory(sourceField, stage));
+
+        Button browseTarget = new Button("[...]");
+        browseTarget.setOnAction(e -> chooseDirectory(targetField, stage));
+
+        startButton = new Button("Avvia");
+        startButton.setOnAction(e -> onStart());
+
+        cancelButton = new Button("Annulla");
+        cancelButton.setDisable(true);
+        cancelButton.setOnAction(e -> {
+            if (worker != null) worker.cancel();
+            statusLabel.setText("Annullamento in corso…");
+        });
+
+        statusLabel = new Label("Pronto.");
+        progressBar = new ProgressBar(0);
+        progressBar.setPrefWidth(350);
+        
+        progressText = new Label(""); // ✅ indicatore numerico
+
+        // ================= GRID per i due percorsi =================
+        GridPane grid = new GridPane();
+        grid.setHgap(10);
+        grid.setVgap(10);
+
+        ColumnConstraints c1 = new ColumnConstraints();
+        ColumnConstraints c2 = new ColumnConstraints();
+        ColumnConstraints c3 = new ColumnConstraints();
+
+        c1.setHgrow(Priority.NEVER);
+        c2.setHgrow(Priority.ALWAYS);  // ✅ textfield si allargano
+        c3.setHgrow(Priority.NEVER);
+
+        grid.getColumnConstraints().addAll(c1, c2, c3);
+
+        grid.add(new Label("ORIGINE:"), 0, 0);
+        grid.add(sourceField, 1, 0);
+        grid.add(browseSource, 2, 0);
+
+        grid.add(new Label("DESTINAZIONE:"), 0, 1);
+        grid.add(targetField, 1, 1);
+        grid.add(browseTarget, 2, 1);
+
+        // =====================================
+        HBox progressBox = new HBox(12, statusLabel, progressBar, progressText);
+        progressBox.setAlignment(Pos.CENTER_LEFT);
+
+        // ✅ bottoni centrati bene sotto la progress bar
+        HBox buttons = new HBox(12, startButton, cancelButton);
+        buttons.setAlignment(Pos.CENTER);
+		HBox.setHgrow(progressBar, Priority.ALWAYS);
+		progressBar.setMaxWidth(Double.MAX_VALUE);
+
+
+        // ============= LAYOUT PRINCIPALE =============
+        VBox root = new VBox(18, grid, cleanCheck, lyricsOnlyCheck, noLyricsOnlyCheck, progressBox, buttons);
+        root.setPadding(new Insets(20));
+        root.setPrefWidth(700);
+
+		Scene scene = new Scene(root);
+		stage.setScene(scene);
+		
+		stage.sizeToScene();
+		stage.show();
+		
+		Platform.runLater(() -> {
+		    double w = stage.getWidth();
+		    double h = stage.getHeight();
+		
+		    stage.setMinWidth(w);
+		    stage.setMaxWidth(w);
+		    stage.setMinHeight(h);
+		    stage.setMaxHeight(h);
+		
+		    stage.setResizable(false);
+		});
+    }
+
+    // ============================= FILECHOOSER =============================
+    private void chooseDirectory(TextField field, Stage stage) {
+        DirectoryChooser dc = new DirectoryChooser();
+        dc.setTitle("Seleziona cartella");
+
+        File existing = new File(field.getText());
+        if (existing.isDirectory()) dc.setInitialDirectory(existing);
+
+        File dir = dc.showDialog(stage);
+        if (dir != null) field.setText(dir.getAbsolutePath());
+    }
+
+    // ============================= START =============================
+    private void onStart() {
+        String origineText = sourceField.getText().trim();
+        String destinazioneText = targetField.getText().trim();
+
+        if (origineText.isEmpty() || destinazioneText.isEmpty()) {
+            alert(Alert.AlertType.WARNING, "Inserisci sia ORIGINE sia DESTINAZIONE.");
+            return;
+        }
+
+        Path src = Paths.get(origineText);
+        Path dst = Paths.get(destinazioneText);
+
+        if (!Files.isDirectory(src)) {
+            alert(Alert.AlertType.ERROR, "La cartella ORIGINE non esiste.");
+            return;
+        }
+
+        if (src.equals(dst) || dst.normalize().startsWith(src.normalize())) {
+            alert(Alert.AlertType.ERROR, "DESTINAZIONE non può essere interna a ORIGINE.");
+            return;
+        }
+
+        try {
+            Files.createDirectories(dst);
+        } catch (Exception ex) {
+            alert(Alert.AlertType.ERROR, "Errore creazione DESTINAZIONE: " + ex.getMessage());
+            return;
+        }
+
+        try { savePathsToProperties(origineText, destinazioneText); } catch (IOException ignored) {}
+
+        startProcess(src, dst);
+    }
+
+    // ============================= LOGICA COPIA =============================
+    private void startProcess(Path src, Path dst) {
+        setBusy(true);
+
+        worker = new Task<>() {
+            private int totalMp3 = 0;
+            private int copiedCount = 0;
+            private int skippedDirs = 0;
+            private int removedCount = 0;
+
+            @Override
+            protected Void call() throws Exception {
+
+                updateMessage("Conteggio file .mp3…");
+                updateProgress(-1, 1);
+
+                totalMp3 = countEligibleMp3(src);
+                if (isCancelled()) return null;
+
+                updateProgress(0, 100);
+
+                // ===== COPIA =====
+                Files.walkFileTree(src, new SimpleFileVisitor<>() {
+
+                    @Override
+                    public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
+                        if (isCancelled()) return FileVisitResult.TERMINATE;
+
+                        String name = dir.getFileName().toString();
+                        if (name.equalsIgnoreCase("_OLD") || name.toUpperCase().startsWith("Z_")) {
+                            skippedDirs++;
+                            return FileVisitResult.SKIP_SUBTREE;
+                        }
+
+                        Files.createDirectories(dst.resolve(src.relativize(dir)));
+                        return FileVisitResult.CONTINUE;
+                    }
+
+                    @Override
+                    public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
+                        if (isCancelled()) return FileVisitResult.TERMINATE;
+
+                        String name = file.getFileName().toString().toLowerCase();
+                        if (name.endsWith(".mp3")) {
+                            if (lyricsOnlyCheck.isSelected() && !containsLyricsBegin(file)) {
+                                return FileVisitResult.CONTINUE;
+                            }
+                            
+                            if (noLyricsOnlyCheck.isSelected() && containsLyricsBegin(file)) {
+                                return FileVisitResult.CONTINUE;
+                            }
+                            
+                            Path rel = src.relativize(file);
+                            Path target = dst.resolve(rel);
+
+                            Files.createDirectories(target.getParent());
+                            Files.copy(file, target, StandardCopyOption.REPLACE_EXISTING);
+
+                            copiedCount++;
+
+                            double pct = (copiedCount * 100.0) / totalMp3;
+                            String indicator = String.format("%d / %d (%.0f%%)", copiedCount, totalMp3, pct);
+
+                            // ✅ aggiorna progress bar
+                            updateProgress(copiedCount, totalMp3);
+
+                            // ✅ aggiorna messaggio generale
+                            updateMessage("Copio… " + copiedCount + " / " + totalMp3);
+
+                            // ✅ aggiorna indicatore numerico
+                            updateTitle(indicator);
+                        }
+                        return FileVisitResult.CONTINUE;
+                    }
+                });
+
+                // ===== CLEAN DEST =====
+                if (!isCancelled() && cleanCheck.isSelected()) {
+                    updateMessage("Pulizia DESTINAZIONE…");
+                    updateProgress(-1, 1);
+
+                    removedCount = cleanDestination(src, dst);
+                }
+
+                return null;
+            }
+
+            @Override
+            protected void succeeded() {
+            	statusLabel.textProperty().unbind();   // ✅ sblocca il binding
+        		progressBar.progressProperty().unbind();
+        		progressBar.setProgress(1.0);   // ✅ ferma la barra
+        	    progressText.textProperty().unbind();
+        	    progressText.setText("Completato");
+
+                finished(true);
+            }
+
+            @Override
+            protected void cancelled() {
+            	statusLabel.textProperty().unbind();   // ✅ sblocca il binding
+        		progressBar.progressProperty().unbind();
+        		progressBar.setProgress(1.0);   // ✅ ferma la barra
+        	    progressText.textProperty().unbind();
+        	    progressText.setText("Annullato");
+
+                finished(false);
+            }
+
+            @Override
+            protected void failed() {
+            	statusLabel.textProperty().unbind();   // ✅ sblocca il binding
+        		progressBar.progressProperty().unbind();
+        		progressBar.setProgress(1.0);   // ✅ ferma la barra
+        	    progressText.textProperty().unbind();
+        	    progressText.setText("Errore");
+
+                finished(false);
+            }
+
+            // ===== UTILITY =====
+
+            private void finished(boolean ok) {
+                setBusy(false);
+
+                if (!ok) {
+                    statusLabel.setText("Operazione annullata.");
+                    alert(Alert.AlertType.WARNING, "Operazione annullata dall’utente.");
+                    return;
+                }
+
+                statusLabel.setText("Completato.");
+                alert(Alert.AlertType.INFORMATION,
+                        "Operazione completata.\n" +
+                                "Copiati: " + copiedCount + "\n" +
+                                "Esclusi: " + skippedDirs + "\n" +
+                                (cleanCheck.isSelected() ? ("Rimossi: " + removedCount) : "")
+                );
+            }
+
+            private int countEligibleMp3(Path root) throws IOException {
+                AtomicInteger count = new AtomicInteger(0);
+
+                Files.walkFileTree(root, new SimpleFileVisitor<>() {
+                    @Override
+                    public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
+                        String name = dir.getFileName().toString();
+                        if (name.equalsIgnoreCase("_OLD") || name.toUpperCase().startsWith("Z_"))
+                            return FileVisitResult.SKIP_SUBTREE;
+                        return FileVisitResult.CONTINUE;
+                    }
+
+                    @Override
+                    public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+                        if (file.toString().toLowerCase().endsWith(".mp3"))
+                            count.incrementAndGet();
+                        return FileVisitResult.CONTINUE;
+                    }
+                });
+
+                return count.get();
+            }
+
+            private int cleanDestination(Path sourceRoot, Path destRoot) throws IOException {
+                AtomicInteger removed = new AtomicInteger(0);
+
+                Files.walkFileTree(destRoot, new SimpleFileVisitor<>() {
+
+                    @Override
+                    public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+                        if (file.toString().toLowerCase().endsWith(".mp3")) {
+                            Path rel = destRoot.relativize(file);
+                            Path originCandidate = sourceRoot.resolve(rel);
+
+                            if (!Files.exists(originCandidate)) {
+                                try {
+                                    Files.delete(file);
+                                    removed.incrementAndGet();
+                                    updateMessage("Rimossi: " + removed.get());
+                                } catch (IOException ignored) {}
+                            }
+                        }
+                        return FileVisitResult.CONTINUE;
+                    }
+                });
+
+                return removed.get();
+            }
+        };
+
+        // Binding UI
+        progressBar.progressProperty().bind(worker.progressProperty());
+        statusLabel.textProperty().bind(worker.messageProperty());
+        progressText.textProperty().bind(worker.titleProperty());
+
+        new Thread(worker).start();
+    }
+
+    // ============================= CONFIG =============================
+    private void loadPathsFromProperties() {
+        File props = new File(getAppDirectory(), "app.properties");
+        if (!props.exists()) return;
+
+        try {
+            Properties p = new Properties();
+            p.load(new FileInputStream(props));
+
+            sourceField.setText(p.getProperty("ORIGINE", ""));
+            targetField.setText(p.getProperty("DESTINAZIONE", ""));
+
+            statusLabel.setText("Configurazione caricata.");
+        } catch (Exception ex) {
+            statusLabel.setText("Errore configurazione: " + ex.getMessage());
+        }
+    }
+
+    private void savePathsToProperties(String origine, String destinazione) throws IOException {
+        File props = new File(getAppDirectory(), "app.properties");
+
+        Properties p = new Properties();
+        p.setProperty("ORIGINE", origine);
+        p.setProperty("DESTINAZIONE", destinazione);
+
+        p.store(new FileOutputStream(props), "Percorsi Midjay MP3 Collector");
+    }
+
+    private File getAppDirectory() {
+        try {
+            URL url = MidjayMp3Collector.class.getProtectionDomain().getCodeSource().getLocation();
+            File f = new File(url.toURI());
+            if (f.isFile()) return f.getParentFile();
+        } catch (Exception ignored) {}
+
+        return new File(".").getAbsoluteFile();
+    }
+
+    private void setBusy(boolean busy) {
+        startButton.setDisable(busy);
+        cancelButton.setDisable(!busy);
+        sourceField.setDisable(busy);
+        targetField.setDisable(busy);
+        cleanCheck.setDisable(busy);
+    }
+
+    private void alert(Alert.AlertType type, String msg) {
+        Platform.runLater(() -> new Alert(type, msg).showAndWait());
+    }
+    
+    private boolean containsLyricsBegin(Path file) {
+        try (FileInputStream fis = new FileInputStream(file.toFile())) {
+            byte[] buffer = new byte[64 * 1024]; // 64 KB
+            int read;
+
+            while ((read = fis.read(buffer)) != -1) {
+                String chunk = new String(buffer, 0, read);
+                if (chunk.contains("LYRICSBEGIN")) {
+                    return true;
+                }
+            }
+        } catch (Exception ignored) {}
+
+        return false;
+    }
+}
