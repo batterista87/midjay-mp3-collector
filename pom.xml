@@ -13,7 +13,7 @@
 		<project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
 		<java.version>25</java.version>
 		<maven.compiler.release>${java.version}</maven.compiler.release>
-		<javafx.version>25.0.2</javafx.version>
+		<javafx.version>25.0.4</javafx.version>
 	</properties>
 
 	<dependencies>
