@@ -1,18 +1,15 @@
 package it.andrea.midjaymp3collector;
 
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.SimpleFileVisitor;
-import java.nio.file.StandardCopyOption;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.HashSet;
 import java.util.Set;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import javafx.application.Application;
 import javafx.application.Platform;
@@ -185,8 +182,11 @@ public class MidjayMp3Collector extends Application {
             return;
         }
 
-        if (src.equals(dst) || dst.normalize().startsWith(src.normalize())) {
-            alert(Alert.AlertType.ERROR, "DESTINAZIONE non può essere interna a ORIGINE.");
+        Path normalizedSource = src.toAbsolutePath().normalize();
+        Path normalizedDestination = dst.toAbsolutePath().normalize();
+        if (normalizedSource.startsWith(normalizedDestination)
+                || normalizedDestination.startsWith(normalizedSource)) {
+            alert(Alert.AlertType.ERROR, "ORIGINE e DESTINAZIONE non possono coincidere o contenersi.");
             return;
         }
 
@@ -202,115 +202,41 @@ public class MidjayMp3Collector extends Application {
 
     private void startProcess(Path src, Path dst) {
         setBusy(true);
+        Mp3CopyService.Options options = new Mp3CopyService.Options(
+                lyricsOnlyCheck.isSelected(),
+                noLyricsOnlyCheck.isSelected(),
+                cleanCheck.isSelected());
 
         worker = new Task<>() {
-
-            private int totalMp3 = 0;
-            private int copiedCount = 0;
-            private int skippedDirs = 0;
-            private int removedCount = 0;
-
-            private final StringBuilder summary = new StringBuilder();
-            private final StringBuilder skippedSummary = new StringBuilder();
-            private Path lastDir = null;
-
-            private final Set<Path> createdDirs = new HashSet<>();
+            private Mp3CopyService.Result result;
 
             @Override
             protected Void call() throws Exception {
-
-                updateMessage("Conteggio file .mp3…");
-                updateProgress(-1, 1);
-
-                totalMp3 = countEligibleMp3(src);
-                if (isCancelled()) return null;
-
-                updateProgress(0, 100);
-
-                Files.walkFileTree(src, new SimpleFileVisitor<>() {
-
+                Mp3CopyService service = new Mp3CopyService();
+                result = service.copy(src, dst, options, this::isCancelled, new Mp3CopyService.ProgressListener() {
                     @Override
-                    public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) throws IOException {
-                        if (isCancelled()) return FileVisitResult.TERMINATE;
-
-                        String name = dir.getFileName().toString();
-                        if (name.equalsIgnoreCase("_OLD") || name.toUpperCase().startsWith("Z_")) {
-                            skippedDirs++;
-                            return FileVisitResult.SKIP_SUBTREE;
-                        }
-
-                        // NON creare qui la cartella
-                        return FileVisitResult.CONTINUE;
+                    public void onStatus(String message) {
+                        updateMessage(message);
                     }
 
                     @Override
-                    public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
-                        if (isCancelled()) return FileVisitResult.TERMINATE;
-
-                        String name = file.getFileName().toString().toLowerCase();
-
-                        // 🔍 IGNORA SUBITO TUTTO CIÒ CHE NON È MP3
-                        if (!name.endsWith(".mp3")) {
-                            return FileVisitResult.CONTINUE;
-                        }
-
-                        boolean hasLyrics = containsLyricsBegin(file);
-
-                        // 🔍 FILTRO: SOLO CON LYRICSBEGIN
-                        if (lyricsOnlyCheck.isSelected() && !hasLyrics) {
-                            skippedSummary.append(file.getFileName().toString().replace(".mp3", "").replace(".MP3", "")).append("\n");
-                            return FileVisitResult.CONTINUE;
-                        }
-
-                        // 🔍 FILTRO: SOLO SENZA LYRICSBEGIN
-                        if (noLyricsOnlyCheck.isSelected() && hasLyrics) {
-                            skippedSummary.append(file.getFileName().toString().replace(".mp3", "").replace(".MP3", "")).append("\n");
-                            return FileVisitResult.CONTINUE;
-                        }
-
-                        // 🔍 AGGIORNA LABEL FILE CORRENTE
+                    public void onCurrentFile(Path file) {
                         Platform.runLater(() -> currentFileLabel.setText(file.toString()));
+                    }
 
-                        // 🔍 COPIA FILE
-                        Path rel = src.relativize(file);
-                        Path target = dst.resolve(rel);
-
-                        Path parent = target.getParent();
-                        Files.createDirectories(parent);
-                        createdDirs.add(parent);
-
-                        Files.copy(file, target, StandardCopyOption.REPLACE_EXISTING);
-
-                        copiedCount++;
-
-                        // === RIEPILOGO ===
-                        Path relParent = rel.getParent();
-                        if (relParent != null && !relParent.equals(lastDir)) {
-                            summary.append("\n").append(relParent.toString().toUpperCase()).append("\n");
-                            lastDir = relParent;
-                        }
-
-                        String baseName = file.getFileName().toString().replace(".mp3", "").replace(".MP3", "");
-                        summary.append(baseName).append("\n");
-
-                        double pct = (copiedCount * 100.0) / totalMp3;
-                        String indicator = String.format("%d / %d (%.0f%%)", copiedCount, totalMp3, pct);
-
-                        updateProgress(copiedCount, totalMp3);
+                    @Override
+                    public void onCopyProgress(int copiedCount, int totalCount) {
+                        updateProgress(copiedCount, totalCount);
                         updateMessage("Copia in corso…");
-                        updateTitle(indicator);
+                        int percentage = totalCount == 0 ? 100 : (int) Math.round(copiedCount * 100.0 / totalCount);
+                        updateTitle(String.format("%d / %d (%d%%)", copiedCount, totalCount, percentage));
+                    }
 
-                        return FileVisitResult.CONTINUE;
+                    @Override
+                    public void onRemovedCount(int removedCount) {
+                        updateMessage("Rimossi: " + removedCount);
                     }
                 });
-
-                if (!isCancelled() && cleanCheck.isSelected()) {
-                    updateMessage("Pulizia DESTINAZIONE…");
-                    updateProgress(-1, 1);
-
-                    removedCount = cleanDestination(src, dst);
-                }
-
                 return null;
             }
 
@@ -322,19 +248,17 @@ public class MidjayMp3Collector extends Application {
                 progressText.textProperty().unbind();
                 progressText.setText("Completato");
 
-                cleanupEmptyDirectories(createdDirs);
-
                 if (lyricsOnlyCheck.isSelected()) {
-                	String finalSummary = summary.toString();
+                    String finalSummary = result.summary();
 
-                	if (skippedSummary.length() > 0) {
-                	    finalSummary += "\n\n=== FILE SCARTATI ===\n" + skippedSummary;
-                	}
+                    if (!result.skippedSummary().isEmpty()) {
+                        finalSummary += "\n\n=== FILE SCARTATI ===\n" + result.skippedSummary();
+                    }
 
-                	showSummaryWindow(finalSummary);
+                    showSummaryWindow(finalSummary);
                 }
 
-                finished(true);
+                finished();
             }
 
             @Override
@@ -345,7 +269,9 @@ public class MidjayMp3Collector extends Application {
                 progressText.textProperty().unbind();
                 progressText.setText("Annullato");
 
-                finished(false);
+                setBusy(false);
+                statusLabel.setText("Operazione annullata.");
+                alert(Alert.AlertType.WARNING, "Operazione annullata dall’utente.");
             }
 
             @Override
@@ -356,106 +282,24 @@ public class MidjayMp3Collector extends Application {
                 progressText.textProperty().unbind();
                 progressText.setText("Errore");
 
-                finished(false);
+                setBusy(false);
+                Throwable error = getException();
+                String detail = error == null || error.getMessage() == null
+                        ? "Errore non specificato."
+                        : error.getMessage();
+                statusLabel.setText("Errore durante l’operazione.");
+                alert(Alert.AlertType.ERROR, "Errore durante l’operazione: " + detail);
             }
 
-            private void finished(boolean ok) {
+            private void finished() {
                 setBusy(false);
-
-                if (!ok) {
-                    statusLabel.setText("Operazione annullata.");
-                    alert(Alert.AlertType.WARNING, "Operazione annullata dall’utente.");
-                    return;
-                }
-
                 statusLabel.setText("Completato.");
                 alert(Alert.AlertType.INFORMATION,
                         "Operazione completata.\n" +
-                                "Copiati: " + copiedCount + "\n" +
-                                "Esclusi: " + skippedDirs + "\n" +
-                                (cleanCheck.isSelected() ? ("Rimossi: " + removedCount) : "")
+                                "Copiati: " + result.copiedCount() + "\n" +
+                                "Esclusi: " + result.skippedDirectories() + "\n" +
+                                (cleanCheck.isSelected() ? ("Rimossi: " + result.removedCount()) : "")
                 );
-            }
-
-            private int countEligibleMp3(Path root) throws IOException {
-                AtomicInteger count = new AtomicInteger(0);
-
-                Files.walkFileTree(root, new SimpleFileVisitor<>() {
-
-                    @Override
-                    public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
-                        String name = dir.getFileName().toString();
-                        if (name.equalsIgnoreCase("_OLD") || name.toUpperCase().startsWith("Z_"))
-                            return FileVisitResult.SKIP_SUBTREE;
-                        return FileVisitResult.CONTINUE;
-                    }
-
-                    @Override
-                    public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
-                        String name = file.toString().toLowerCase();
-
-                        if (!name.endsWith(".mp3"))
-                            return FileVisitResult.CONTINUE;
-
-                        boolean hasLyrics = containsLyricsBegin(file);
-
-                        // FILTRO: solo con LyricsBegin
-                        if (lyricsOnlyCheck.isSelected() && !hasLyrics)
-                            return FileVisitResult.CONTINUE;
-
-                        // FILTRO: solo senza LyricsBegin
-                        if (noLyricsOnlyCheck.isSelected() && hasLyrics)
-                            return FileVisitResult.CONTINUE;
-
-                        // Se arriva qui → è un file valido
-                        count.incrementAndGet();
-                        return FileVisitResult.CONTINUE;
-                    }
-                });
-
-                return count.get();
-            }
-
-            private int cleanDestination(Path sourceRoot, Path destRoot) throws IOException {
-                AtomicInteger removed = new AtomicInteger(0);
-
-                Files.walkFileTree(destRoot, new SimpleFileVisitor<>() {
-
-                    @Override
-                    public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
-                        if (file.toString().toLowerCase().endsWith(".mp3")) {
-                            Path rel = destRoot.relativize(file);
-                            Path originCandidate = sourceRoot.resolve(rel);
-
-                            if (!Files.exists(originCandidate)) {
-                                try {
-                                    Files.delete(file);
-                                    removed.incrementAndGet();
-                                    updateMessage("Rimossi: " + removed.get());
-                                } catch (IOException ignored) {}
-                            }
-                        }
-                        return FileVisitResult.CONTINUE;
-                    }
-                });
-
-                return removed.get();
-            }
-
-            private void cleanupEmptyDirectories(Set<Path> dirs) {
-                for (Path dir : dirs) {
-                    try {
-                        if (Files.isDirectory(dir) && isDirectoryEmpty(dir)) {
-                            Files.delete(dir);
-                        }
-                    } catch (Exception ignored) {}
-                }
-            }
-
-            private boolean isDirectoryEmpty(Path dir) throws IOException {
-                try (var stream = Files.list(dir)) {
-                    return !stream.findAny().isPresent();
-                }
             }
         };
 
@@ -480,20 +324,8 @@ public class MidjayMp3Collector extends Application {
         Platform.runLater(() -> new Alert(type, msg).showAndWait());
     }
 
-    private boolean containsLyricsBegin(Path file) {
-        try (FileInputStream fis = new FileInputStream(file.toFile())) {
-            byte[] buffer = new byte[64 * 1024];
-            int read;
-
-            while ((read = fis.read(buffer)) != -1) {
-                String chunk = new String(buffer, 0, read);
-                if (chunk.contains("LYRICSBEGIN")) {
-                    return true;
-                }
-            }
-        } catch (Exception ignored) {}
-
-        return false;
+    private boolean containsLyricsBegin(Path file) throws IOException {
+        return Mp3CopyService.containsLyricsBegin(file);
     }
 
     private void showSummaryWindow(String text) {
@@ -571,7 +403,7 @@ public class MidjayMp3Collector extends Application {
             }
 
             @Override
-            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
                 String name = file.getFileName().toString().toLowerCase();
 
                 if (!name.endsWith(".mp3")) return FileVisitResult.CONTINUE;
@@ -651,7 +483,7 @@ public class MidjayMp3Collector extends Application {
             }
 
             @Override
-            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
                 String name = file.getFileName().toString().toLowerCase();
 
                 if (!name.endsWith(".mp3")) return FileVisitResult.CONTINUE;
