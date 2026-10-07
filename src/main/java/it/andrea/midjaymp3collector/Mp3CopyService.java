@@ -1,6 +1,5 @@
 package it.andrea.midjaymp3collector;
 
-import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.file.DirectoryNotEmptyException;
 import java.nio.file.FileVisitResult;
@@ -61,7 +60,7 @@ final class Mp3CopyService {
                     return FileVisitResult.CONTINUE;
                 }
 
-                boolean hasLyrics = containsLyricsBegin(file);
+                boolean hasLyrics = Mp3ScanService.containsLyricsBegin(file);
                 if (isFiltered(options, hasLyrics)) {
                     skippedSummary.append(baseName(file)).append('\n');
                     return FileVisitResult.CONTINUE;
@@ -100,19 +99,6 @@ final class Mp3CopyService {
                 summary.toString(), skippedSummary.toString());
     }
 
-    static boolean containsLyricsBegin(Path file) throws IOException {
-        try (FileInputStream input = new FileInputStream(file.toFile())) {
-            byte[] buffer = new byte[64 * 1024];
-            int read;
-            while ((read = input.read(buffer)) != -1) {
-                if (new String(buffer, 0, read).contains("LYRICSBEGIN")) {
-                    return true;
-                }
-            }
-        }
-        return false;
-    }
-
     private int countEligibleMp3(Path root, Options options, BooleanSupplier cancelled) throws IOException {
         AtomicInteger count = new AtomicInteger();
 
@@ -130,7 +116,7 @@ final class Mp3CopyService {
                 if (cancelled.getAsBoolean()) {
                     return FileVisitResult.TERMINATE;
                 }
-                if (isMp3(file) && !isFiltered(options, containsLyricsBegin(file))) {
+                if (isMp3(file) && !isFiltered(options, Mp3ScanService.containsLyricsBegin(file))) {
                     count.incrementAndGet();
                 }
                 return FileVisitResult.CONTINUE;

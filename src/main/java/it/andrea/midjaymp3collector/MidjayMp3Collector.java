@@ -1,15 +1,9 @@
 package it.andrea.midjaymp3collector;
 
 import java.io.File;
-import java.io.IOException;
-import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.nio.file.SimpleFileVisitor;
-import java.nio.file.attribute.BasicFileAttributes;
-import java.util.HashSet;
-import java.util.Set;
 import java.util.prefs.Preferences;
 
 import javafx.application.Application;
@@ -347,10 +341,6 @@ public class MidjayMp3Collector extends Application {
         Platform.runLater(() -> new Alert(type, msg).showAndWait());
     }
 
-    private boolean containsLyricsBegin(Path file) throws IOException {
-        return Mp3CopyService.containsLyricsBegin(file);
-    }
-
     private void showSummaryWindow(String text) {
         Platform.runLater(() -> {
             Stage dialog = new Stage();
@@ -391,7 +381,7 @@ public class MidjayMp3Collector extends Application {
 
             @Override
             protected String call() throws Exception {
-                return scanAndBuildList(src);
+                return new Mp3ScanService().scanAllMp3(src);
             }
 
             @Override
@@ -406,50 +396,6 @@ public class MidjayMp3Collector extends Application {
         };
 
         new Thread(task).start();
-    }
-    
-    private String scanAndBuildList(Path src) throws IOException {
-        StringBuilder list = new StringBuilder();
-        Set<String> printedDirs = new HashSet<>();
-
-        Files.walkFileTree(src, new SimpleFileVisitor<>() {
-
-            @Override
-            public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
-                String name = dir.getFileName().toString();
-
-                if (name.equalsIgnoreCase("_OLD") || name.toUpperCase().startsWith("Z_")) {
-                    return FileVisitResult.SKIP_SUBTREE;
-                }
-
-                return FileVisitResult.CONTINUE;
-            }
-
-            @Override
-            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
-                String name = file.getFileName().toString().toLowerCase();
-
-                if (!name.endsWith(".mp3")) return FileVisitResult.CONTINUE;
-
-                Path rel = src.relativize(file);
-                Path parent = rel.getParent();
-
-                if (parent != null) {
-                    String parentStr = parent.toString();
-                    if (!printedDirs.contains(parentStr)) {
-                        list.append("\n").append(parentStr).append("\n");
-                        printedDirs.add(parentStr);
-                    }
-                }
-
-                String baseName = file.getFileName().toString().replace(".mp3", "").replace(".MP3", "");
-                list.append("  ").append(baseName).append("\n");
-
-                return FileVisitResult.CONTINUE;
-            }
-        });
-
-        return list.toString();
     }
     
     private void onPrintLyricsOnly() {
@@ -471,7 +417,7 @@ public class MidjayMp3Collector extends Application {
 
             @Override
             protected String call() throws Exception {
-                return scanLyricsOnly(src);
+                return new Mp3ScanService().scanMp3WithLyrics(src);
             }
 
             @Override
@@ -487,54 +433,5 @@ public class MidjayMp3Collector extends Application {
 
         new Thread(task).start();
     }
-
-    private String scanLyricsOnly(Path src) throws IOException {
-        StringBuilder list = new StringBuilder();
-        Set<String> printedDirs = new HashSet<>();
-
-        Files.walkFileTree(src, new SimpleFileVisitor<>() {
-
-            @Override
-            public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
-                String name = dir.getFileName().toString();
-
-                if (name.equalsIgnoreCase("_OLD") || name.toUpperCase().startsWith("Z_")) {
-                    return FileVisitResult.SKIP_SUBTREE;
-                }
-
-                return FileVisitResult.CONTINUE;
-            }
-
-            @Override
-            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
-                String name = file.getFileName().toString().toLowerCase();
-
-                if (!name.endsWith(".mp3")) return FileVisitResult.CONTINUE;
-
-                // 🔍 Usa la tua funzione già esistente
-                boolean hasLyrics = containsLyricsBegin(file);
-                if (!hasLyrics) return FileVisitResult.CONTINUE;
-
-                Path rel = src.relativize(file);
-                Path parent = rel.getParent();
-
-                if (parent != null) {
-                    String parentStr = parent.toString();
-                    if (!printedDirs.contains(parentStr)) {
-                        list.append("\n").append(parentStr.toUpperCase()).append("\n");
-                        printedDirs.add(parentStr);
-                    }
-                }
-
-                String baseName = file.getFileName().toString().replace(".mp3", "").replace(".MP3", "");
-                list.append("  ").append(baseName).append("\n");
-
-                return FileVisitResult.CONTINUE;
-            }
-        });
-
-        return list.toString();
-    }
-
 
 }
