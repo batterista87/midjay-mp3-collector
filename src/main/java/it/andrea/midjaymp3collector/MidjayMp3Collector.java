@@ -10,6 +10,7 @@ import java.nio.file.SimpleFileVisitor;
 import java.nio.file.attribute.BasicFileAttributes;
 import java.util.HashSet;
 import java.util.Set;
+import java.util.prefs.Preferences;
 
 import javafx.application.Application;
 import javafx.application.Platform;
@@ -34,6 +35,9 @@ import javafx.stage.Stage;
 
 public class MidjayMp3Collector extends Application {
 
+    private static final String SOURCE_DIRECTORY_KEY = "sourceDirectory";
+    private static final String DESTINATION_DIRECTORY_KEY = "destinationDirectory";
+
     private TextField sourceField;
     private TextField targetField;
     private CheckBox cleanCheck;
@@ -47,17 +51,23 @@ public class MidjayMp3Collector extends Application {
     private Label currentFileLabel;
 
     private Task<Void> worker;
+    private final Preferences preferences = Preferences.userNodeForPackage(MidjayMp3Collector.class);
 
     public static void main(String[] args) {
         launch(args);
     }
 
     @Override
+    public void stop() {
+        saveLastUsedPaths();
+    }
+
+    @Override
     public void start(Stage stage) {
         stage.setTitle("Midjay MP3 Collector");
 
-        sourceField = new TextField();
-        targetField = new TextField();
+        sourceField = new TextField(preferences.get(SOURCE_DIRECTORY_KEY, ""));
+        targetField = new TextField(preferences.get(DESTINATION_DIRECTORY_KEY, ""));
         cleanCheck = new CheckBox("PULISCI DESTINAZIONE (rimuove .mp3 extra)");
         lyricsOnlyCheck = new CheckBox("COPIA SOLO FILE CON LYRICSBEGIN");
         noLyricsOnlyCheck = new CheckBox("COPIA SOLO FILE SENZA LYRICSBEGIN");
@@ -162,7 +172,10 @@ public class MidjayMp3Collector extends Application {
         if (existing.isDirectory()) dc.setInitialDirectory(existing);
 
         File dir = dc.showDialog(stage);
-        if (dir != null) field.setText(dir.getAbsolutePath());
+        if (dir != null) {
+            field.setText(dir.getAbsolutePath());
+            saveLastUsedPaths();
+        }
     }
 
     private void onStart() {
@@ -197,7 +210,17 @@ public class MidjayMp3Collector extends Application {
             return;
         }
 
+        saveLastUsedPaths();
         startProcess(src, dst);
+    }
+
+    private void saveLastUsedPaths() {
+        if (sourceField != null) {
+            preferences.put(SOURCE_DIRECTORY_KEY, sourceField.getText().trim());
+        }
+        if (targetField != null) {
+            preferences.put(DESTINATION_DIRECTORY_KEY, targetField.getText().trim());
+        }
     }
 
     private void startProcess(Path src, Path dst) {
