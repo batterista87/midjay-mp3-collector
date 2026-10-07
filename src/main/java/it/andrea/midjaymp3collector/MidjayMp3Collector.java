@@ -115,8 +115,11 @@ public class MidjayMp3Collector extends Application {
         
         Button printListButton = new Button("STAMPA LISTA");
         printListButton.setOnAction(e -> onPrintList());
+        
+        Button printLyricsButton = new Button("STAMPA SOLO LYRICSBEGIN");
+        printLyricsButton.setOnAction(e -> onPrintLyricsOnly());
 
-        HBox buttons = new HBox(12, startButton, cancelButton, printListButton);
+        HBox buttons = new HBox(12, startButton, cancelButton, printListButton, printLyricsButton);
 
         buttons.setAlignment(Pos.CENTER);
         HBox.setHgrow(progressBar, Priority.ALWAYS);
@@ -580,6 +583,90 @@ public class MidjayMp3Collector extends Application {
                     String parentStr = parent.toString();
                     if (!printedDirs.contains(parentStr)) {
                         list.append("\n").append(parentStr).append("\n");
+                        printedDirs.add(parentStr);
+                    }
+                }
+
+                String baseName = file.getFileName().toString().replace(".mp3", "").replace(".MP3", "");
+                list.append("  ").append(baseName).append("\n");
+
+                return FileVisitResult.CONTINUE;
+            }
+        });
+
+        return list.toString();
+    }
+    
+    private void onPrintLyricsOnly() {
+        String origineText = sourceField.getText().trim();
+
+        if (origineText.isEmpty()) {
+            alert(Alert.AlertType.WARNING, "Inserisci la cartella ORIGINE.");
+            return;
+        }
+
+        Path src = Paths.get(origineText);
+
+        if (!Files.isDirectory(src)) {
+            alert(Alert.AlertType.ERROR, "La cartella ORIGINE non esiste.");
+            return;
+        }
+
+        Task<String> task = new Task<>() {
+
+            @Override
+            protected String call() throws Exception {
+                return scanLyricsOnly(src);
+            }
+
+            @Override
+            protected void succeeded() {
+                showSummaryWindow(getValue());
+            }
+
+            @Override
+            protected void failed() {
+                alert(Alert.AlertType.ERROR, "Errore durante la scansione.");
+            }
+        };
+
+        new Thread(task).start();
+    }
+
+    private String scanLyricsOnly(Path src) throws IOException {
+        StringBuilder list = new StringBuilder();
+        Set<String> printedDirs = new HashSet<>();
+
+        Files.walkFileTree(src, new SimpleFileVisitor<>() {
+
+            @Override
+            public FileVisitResult preVisitDirectory(Path dir, BasicFileAttributes attrs) {
+                String name = dir.getFileName().toString();
+
+                if (name.equalsIgnoreCase("_OLD") || name.toUpperCase().startsWith("Z_")) {
+                    return FileVisitResult.SKIP_SUBTREE;
+                }
+
+                return FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+                String name = file.getFileName().toString().toLowerCase();
+
+                if (!name.endsWith(".mp3")) return FileVisitResult.CONTINUE;
+
+                // 🔍 Usa la tua funzione già esistente
+                boolean hasLyrics = containsLyricsBegin(file);
+                if (!hasLyrics) return FileVisitResult.CONTINUE;
+
+                Path rel = src.relativize(file);
+                Path parent = rel.getParent();
+
+                if (parent != null) {
+                    String parentStr = parent.toString();
+                    if (!printedDirs.contains(parentStr)) {
+                        list.append("\n").append(parentStr.toUpperCase()).append("\n");
                         printedDirs.add(parentStr);
                     }
                 }
