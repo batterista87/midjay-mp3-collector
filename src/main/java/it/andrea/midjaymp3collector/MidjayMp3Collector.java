@@ -67,6 +67,16 @@ public class MidjayMp3Collector extends Application {
         cleanCheck = new CheckBox("PULISCI DESTINAZIONE (rimuove .mp3 extra)");
         lyricsOnlyCheck = new CheckBox("COPIA SOLO FILE CON LYRICSBEGIN");
         noLyricsOnlyCheck = new CheckBox("COPIA SOLO FILE SENZA LYRICSBEGIN");
+        lyricsOnlyCheck.setOnAction(event -> {
+            if (lyricsOnlyCheck.isSelected()) {
+                noLyricsOnlyCheck.setSelected(false);
+            }
+        });
+        noLyricsOnlyCheck.setOnAction(event -> {
+            if (noLyricsOnlyCheck.isSelected()) {
+                lyricsOnlyCheck.setSelected(false);
+            }
+        });
 
         browseSourceButton = new Button("[...]");
         browseSourceButton.setOnAction(e -> chooseDirectory(sourceField, stage));
