@@ -29,13 +29,14 @@ final class Mp3CopyService {
         listener.onStatus("Conteggio file .mp3…");
         int totalMp3 = countEligibleMp3(sourceRoot, options, cancelled);
         if (cancelled.getAsBoolean()) {
-            return new Result(0, 0, 0, "", "");
+            return new Result(0, 0, 0, 0, "", "");
         }
 
         listener.onCopyProgress(0, totalMp3);
 
         AtomicInteger copiedCount = new AtomicInteger();
         AtomicInteger skippedDirectories = new AtomicInteger();
+        AtomicInteger filteredCount = new AtomicInteger();
         StringBuilder summary = new StringBuilder();
         StringBuilder skippedSummary = new StringBuilder();
         Set<Path> createdDirectories = new HashSet<>();
@@ -64,12 +65,12 @@ final class Mp3CopyService {
                     return FileVisitResult.CONTINUE;
                 }
 
-                boolean hasLyrics = requiresLyricsCheck(options)
-                        && Mp3ScanService.containsLyricsBegin(file, cancelled);
+                boolean hasLyrics = requiresLyricsCheck(options) && containsLyrics(file, cancelled);
                 if (cancelled.getAsBoolean()) {
                     return FileVisitResult.TERMINATE;
                 }
                 if (isFiltered(options, hasLyrics)) {
+                    filteredCount.incrementAndGet();
                     skippedSummary.append(baseName(file)).append('\n');
                     return FileVisitResult.CONTINUE;
                 }
@@ -78,9 +79,19 @@ final class Mp3CopyService {
                 Path relativePath = sourceRoot.relativize(file);
                 Path target = destinationRoot.resolve(relativePath);
                 Path parent = target.getParent();
-                Files.createDirectories(parent);
+                try {
+                    Files.createDirectories(parent);
+                } catch (IOException ex) {
+                    throw new IOException("Impossibile preparare la destinazione per il file '" + file
+                            + "' in '" + target + "': " + ex.getMessage(), ex);
+                }
                 createdDirectories.add(parent);
-                Files.copy(file, target, StandardCopyOption.REPLACE_EXISTING);
+                try {
+                    Files.copy(file, target, StandardCopyOption.REPLACE_EXISTING);
+                } catch (IOException ex) {
+                    throw new IOException("Impossibile copiare il file '" + file + "' in '" + target
+                            + "': " + ex.getMessage(), ex);
+                }
 
                 int copied = copiedCount.incrementAndGet();
                 Path relativeParent = relativePath.getParent();
@@ -104,7 +115,7 @@ final class Mp3CopyService {
         }
 
         return new Result(copiedCount.get(), skippedDirectories.get(), removedCount,
-                summary.toString(), skippedSummary.toString());
+                filteredCount.get(), summary.toString(), skippedSummary.toString());
     }
 
     private int countEligibleMp3(Path root, Options options, BooleanSupplier cancelled) throws IOException {
@@ -125,7 +136,7 @@ final class Mp3CopyService {
                     return FileVisitResult.TERMINATE;
                 }
                 if (isMp3(file) && (!requiresLyricsCheck(options)
-                        || !isFiltered(options, Mp3ScanService.containsLyricsBegin(file, cancelled)))) {
+                        || !isFiltered(options, containsLyrics(file, cancelled)))) {
                     count.incrementAndGet();
                 }
                 return FileVisitResult.CONTINUE;
@@ -156,7 +167,12 @@ final class Mp3CopyService {
                     Path relativePath = destinationRoot.relativize(file);
                     Path sourceFile = sourceRoot.resolve(relativePath);
                     if (isDefinitelyMissing(sourceFile)) {
-                        Files.delete(file);
+                        try {
+                            Files.delete(file);
+                        } catch (IOException ex) {
+                            throw new IOException("Impossibile rimuovere il file extra '" + file
+                                    + "': " + ex.getMessage(), ex);
+                        }
                         addParentDirectories(file.getParent(), normalizedDestination, affectedDirectories);
                         listener.onRemovedCount(removed.incrementAndGet());
                     }
@@ -185,6 +201,18 @@ final class Mp3CopyService {
             return false;
         } catch (NoSuchFileException ex) {
             return true;
+        } catch (IOException ex) {
+            throw new IOException("Impossibile verificare il file sorgente '" + sourceFile
+                    + "': " + ex.getMessage(), ex);
+        }
+    }
+
+    private boolean containsLyrics(Path file, BooleanSupplier cancelled) throws IOException {
+        try {
+            return Mp3ScanService.containsLyricsBegin(file, cancelled);
+        } catch (IOException ex) {
+            throw new IOException("Impossibile leggere il file MP3 '" + file
+                    + "' per verificare LYRICSBEGIN: " + ex.getMessage(), ex);
         }
     }
 
@@ -246,7 +274,7 @@ final class Mp3CopyService {
 
     record Options(boolean lyricsOnly, boolean noLyricsOnly, boolean cleanDestination) {}
 
-    record Result(int copiedCount, int skippedDirectories, int removedCount,
+    record Result(int copiedCount, int skippedDirectories, int removedCount, int filteredCount,
             String summary, String skippedSummary) {}
 
     interface ProgressListener {
