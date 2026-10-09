@@ -28,7 +28,9 @@ final class Mp3ScanService {
                 if (cancelled.getAsBoolean()) {
                     return FileVisitResult.TERMINATE;
                 }
-                return isExcludedDirectory(directory) ? FileVisitResult.SKIP_SUBTREE : FileVisitResult.CONTINUE;
+                return Mp3FileRules.isExcludedDirectory(directory)
+                        ? FileVisitResult.SKIP_SUBTREE
+                        : FileVisitResult.CONTINUE;
             }
 
             @Override
@@ -36,7 +38,7 @@ final class Mp3ScanService {
                 if (cancelled.getAsBoolean()) {
                     return FileVisitResult.TERMINATE;
                 }
-                if (!isMp3(file)) {
+                if (!Mp3FileRules.isMp3(file)) {
                     return FileVisitResult.CONTINUE;
                 }
 
@@ -58,7 +60,9 @@ final class Mp3ScanService {
                 if (cancelled.getAsBoolean()) {
                     return FileVisitResult.TERMINATE;
                 }
-                return isExcludedDirectory(directory) ? FileVisitResult.SKIP_SUBTREE : FileVisitResult.CONTINUE;
+                return Mp3FileRules.isExcludedDirectory(directory)
+                        ? FileVisitResult.SKIP_SUBTREE
+                        : FileVisitResult.CONTINUE;
             }
 
             @Override
@@ -66,7 +70,7 @@ final class Mp3ScanService {
                 if (cancelled.getAsBoolean()) {
                     return FileVisitResult.TERMINATE;
                 }
-                if (!isMp3(file) || !containsLyricsBegin(file, cancelled)) {
+                if (!Mp3FileRules.isMp3(file) || !containsLyricsBegin(file, cancelled)) {
                     return cancelled.getAsBoolean() ? FileVisitResult.TERMINATE : FileVisitResult.CONTINUE;
                 }
                 if (cancelled.getAsBoolean()) {
@@ -135,18 +139,5 @@ final class Mp3ScanService {
 
         String name = relativePath.getFileName().toString();
         list.append("  ").append(name.substring(0, name.length() - ".mp3".length())).append('\n');
-    }
-
-    private boolean isExcludedDirectory(Path directory) {
-        Path fileName = directory.getFileName();
-        if (fileName == null) {
-            return false;
-        }
-        String name = fileName.toString();
-        return name.equalsIgnoreCase("_OLD") || name.toUpperCase(Locale.ROOT).startsWith("Z_");
-    }
-
-    private boolean isMp3(Path file) {
-        return file.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".mp3");
     }
 }
