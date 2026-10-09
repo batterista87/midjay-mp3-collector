@@ -60,7 +60,8 @@ final class Mp3CopyService {
                     return FileVisitResult.CONTINUE;
                 }
 
-                boolean hasLyrics = Mp3ScanService.containsLyricsBegin(file);
+                boolean hasLyrics = requiresLyricsCheck(options)
+                        && Mp3ScanService.containsLyricsBegin(file);
                 if (isFiltered(options, hasLyrics)) {
                     skippedSummary.append(baseName(file)).append('\n');
                     return FileVisitResult.CONTINUE;
@@ -116,7 +117,8 @@ final class Mp3CopyService {
                 if (cancelled.getAsBoolean()) {
                     return FileVisitResult.TERMINATE;
                 }
-                if (isMp3(file) && !isFiltered(options, Mp3ScanService.containsLyricsBegin(file))) {
+                if (isMp3(file) && (!requiresLyricsCheck(options)
+                        || !isFiltered(options, Mp3ScanService.containsLyricsBegin(file)))) {
                     count.incrementAndGet();
                 }
                 return FileVisitResult.CONTINUE;
@@ -200,6 +202,10 @@ final class Mp3CopyService {
 
     private boolean isFiltered(Options options, boolean hasLyrics) {
         return (options.lyricsOnly() && !hasLyrics) || (options.noLyricsOnly() && hasLyrics);
+    }
+
+    private boolean requiresLyricsCheck(Options options) {
+        return options.lyricsOnly() || options.noLyricsOnly();
     }
 
     private String baseName(Path file) {
