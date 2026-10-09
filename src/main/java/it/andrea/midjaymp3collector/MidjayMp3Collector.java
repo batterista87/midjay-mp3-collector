@@ -226,6 +226,13 @@ public class MidjayMp3Collector extends Application {
                 result = copyService.copy(src, dst, options, this::isCancelled,
                         new Mp3CopyService.ProgressListener() {
                     @Override
+                    public void onCountingStarted() {
+                        updateProgress(-1, 1);
+                        updateMessage("Conteggio file .mp3…");
+                        updateTitle("");
+                    }
+
+                    @Override
                     public void onStatus(String message) {
                         updateMessage(message);
                     }

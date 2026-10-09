@@ -26,7 +26,7 @@ final class Mp3CopyService {
         }
         validateRoots(sourceRoot, destinationRoot);
 
-        listener.onStatus("Conteggio file .mp3…");
+        listener.onCountingStarted();
         int totalMp3 = countMp3(sourceRoot, cancelled);
         if (cancelled.getAsBoolean()) {
             return new Result(0, 0, 0, 0, "", "");
@@ -49,7 +49,7 @@ final class Mp3CopyService {
                     return FileVisitResult.TERMINATE;
                 }
 
-                if (isExcludedDirectory(directory)) {
+                if (Mp3FileRules.isExcludedDirectory(directory)) {
                     skippedDirectories.incrementAndGet();
                     return FileVisitResult.SKIP_SUBTREE;
                 }
@@ -61,7 +61,7 @@ final class Mp3CopyService {
                 if (cancelled.getAsBoolean()) {
                     return FileVisitResult.TERMINATE;
                 }
-                if (!isMp3(file)) {
+                if (!Mp3FileRules.isMp3(file)) {
                     return FileVisitResult.CONTINUE;
                 }
 
@@ -128,7 +128,9 @@ final class Mp3CopyService {
                 if (cancelled.getAsBoolean()) {
                     return FileVisitResult.TERMINATE;
                 }
-                return isExcludedDirectory(directory) ? FileVisitResult.SKIP_SUBTREE : FileVisitResult.CONTINUE;
+                return Mp3FileRules.isExcludedDirectory(directory)
+                        ? FileVisitResult.SKIP_SUBTREE
+                        : FileVisitResult.CONTINUE;
             }
 
             @Override
@@ -136,7 +138,7 @@ final class Mp3CopyService {
                 if (cancelled.getAsBoolean()) {
                     return FileVisitResult.TERMINATE;
                 }
-                if (isMp3(file)) {
+                if (Mp3FileRules.isMp3(file)) {
                     count.incrementAndGet();
                 }
                 return FileVisitResult.CONTINUE;
@@ -163,7 +165,7 @@ final class Mp3CopyService {
                 if (cancelled.getAsBoolean()) {
                     return FileVisitResult.TERMINATE;
                 }
-                if (isMp3(file)) {
+                if (Mp3FileRules.isMp3(file)) {
                     Path relativePath = destinationRoot.relativize(file);
                     Path sourceFile = sourceRoot.resolve(relativePath);
                     if (isDefinitelyMissing(sourceFile)) {
@@ -246,19 +248,6 @@ final class Mp3CopyService {
         }
     }
 
-    private boolean isExcludedDirectory(Path directory) {
-        Path fileName = directory.getFileName();
-        if (fileName == null) {
-            return false;
-        }
-        String name = fileName.toString();
-        return name.equalsIgnoreCase("_OLD") || name.toUpperCase(Locale.ROOT).startsWith("Z_");
-    }
-
-    private boolean isMp3(Path file) {
-        return file.getFileName().toString().toLowerCase(Locale.ROOT).endsWith(".mp3");
-    }
-
     private boolean isFiltered(Options options, boolean hasLyrics) {
         return (options.lyricsOnly() && !hasLyrics) || (options.noLyricsOnly() && hasLyrics);
     }
@@ -278,6 +267,8 @@ final class Mp3CopyService {
             String summary, String skippedSummary) {}
 
     interface ProgressListener {
+        void onCountingStarted();
+
         void onStatus(String message);
 
         void onCurrentFile(Path file);
