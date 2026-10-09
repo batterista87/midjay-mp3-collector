@@ -155,7 +155,42 @@ final class Mp3CopyService {
             }
         });
 
+        if (!cancelled.getAsBoolean()) {
+            cleanupEmptyDirectories(destinationRoot, cancelled);
+        }
         return removed.get();
+    }
+
+    private void cleanupEmptyDirectories(Path root, BooleanSupplier cancelled) throws IOException {
+        Path normalizedRoot = root.toAbsolutePath().normalize();
+        Files.walkFileTree(root, new SimpleFileVisitor<>() {
+            @Override
+            public FileVisitResult preVisitDirectory(Path directory, BasicFileAttributes attrs) {
+                return cancelled.getAsBoolean() ? FileVisitResult.TERMINATE : FileVisitResult.CONTINUE;
+            }
+
+            @Override
+            public FileVisitResult postVisitDirectory(Path directory, IOException error) throws IOException {
+                if (error != null) {
+                    throw error;
+                }
+                if (cancelled.getAsBoolean()
+                        || directory.toAbsolutePath().normalize().equals(normalizedRoot)) {
+                    return cancelled.getAsBoolean() ? FileVisitResult.TERMINATE : FileVisitResult.CONTINUE;
+                }
+
+                try (Stream<Path> entries = Files.list(directory)) {
+                    if (!entries.findAny().isPresent()) {
+                        try {
+                            Files.delete(directory);
+                        } catch (DirectoryNotEmptyException ignored) {
+                            // Another process added an entry after the empty-directory check.
+                        }
+                    }
+                }
+                return FileVisitResult.CONTINUE;
+            }
+        });
     }
 
     private void cleanupEmptyDirectories(Set<Path> directories) throws IOException {
