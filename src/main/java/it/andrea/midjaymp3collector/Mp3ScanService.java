@@ -2,6 +2,7 @@ package it.andrea.midjaymp3collector;
 
 import java.io.FileInputStream;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -12,6 +13,9 @@ import java.util.Locale;
 import java.util.Set;
 
 final class Mp3ScanService {
+
+    private static final byte[] LYRICS_BEGIN = "LYRICSBEGIN".getBytes(StandardCharsets.US_ASCII);
+    private static final int[] LYRICS_BEGIN_PREFIX = buildPrefixTable();
 
     String scanAllMp3(Path sourceRoot) throws IOException {
         StringBuilder list = new StringBuilder();
@@ -65,13 +69,37 @@ final class Mp3ScanService {
         try (FileInputStream input = new FileInputStream(file.toFile())) {
             byte[] buffer = new byte[64 * 1024];
             int read;
+            int matched = 0;
             while ((read = input.read(buffer)) != -1) {
-                if (new String(buffer, 0, read).contains("LYRICSBEGIN")) {
-                    return true;
+                for (int i = 0; i < read; i++) {
+                    while (matched > 0 && buffer[i] != LYRICS_BEGIN[matched]) {
+                        matched = LYRICS_BEGIN_PREFIX[matched - 1];
+                    }
+                    if (buffer[i] == LYRICS_BEGIN[matched]) {
+                        matched++;
+                        if (matched == LYRICS_BEGIN.length) {
+                            return true;
+                        }
+                    }
                 }
             }
         }
         return false;
+    }
+
+    private static int[] buildPrefixTable() {
+        int[] prefix = new int[LYRICS_BEGIN.length];
+        int matched = 0;
+        for (int i = 1; i < LYRICS_BEGIN.length; i++) {
+            while (matched > 0 && LYRICS_BEGIN[i] != LYRICS_BEGIN[matched]) {
+                matched = prefix[matched - 1];
+            }
+            if (LYRICS_BEGIN[i] == LYRICS_BEGIN[matched]) {
+                matched++;
+                prefix[i] = matched;
+            }
+        }
+        return prefix;
     }
 
     private void appendFile(StringBuilder list, Set<String> printedDirectories, Path relativePath,
