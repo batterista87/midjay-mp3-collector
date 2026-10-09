@@ -1,10 +1,8 @@
 package it.andrea.midjaymp3collector;
 
 import java.io.File;
-import java.nio.file.Files;
+import java.io.IOException;
 import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.util.prefs.Preferences;
 
 import javafx.application.Application;
 import javafx.application.Platform;
@@ -29,9 +27,6 @@ import javafx.stage.Stage;
 
 public class MidjayMp3Collector extends Application {
 
-    private static final String SOURCE_DIRECTORY_KEY = "sourceDirectory";
-    private static final String DESTINATION_DIRECTORY_KEY = "destinationDirectory";
-
     private TextField sourceField;
     private TextField targetField;
     private CheckBox cleanCheck;
@@ -45,7 +40,10 @@ public class MidjayMp3Collector extends Application {
     private Label currentFileLabel;
 
     private Task<Void> worker;
-    private final Preferences preferences = Preferences.userNodeForPackage(MidjayMp3Collector.class);
+    private final DirectoryPreferences directoryPreferences = new DirectoryPreferences();
+    private final DirectoryService directoryService = new DirectoryService();
+    private final Mp3CopyService copyService = new Mp3CopyService();
+    private final Mp3ScanService scanService = new Mp3ScanService();
 
     public static void main(String[] args) {
         launch(args);
@@ -60,8 +58,8 @@ public class MidjayMp3Collector extends Application {
     public void start(Stage stage) {
         stage.setTitle("Midjay MP3 Collector");
 
-        sourceField = new TextField(preferences.get(SOURCE_DIRECTORY_KEY, ""));
-        targetField = new TextField(preferences.get(DESTINATION_DIRECTORY_KEY, ""));
+        sourceField = new TextField(directoryPreferences.sourceDirectory());
+        targetField = new TextField(directoryPreferences.destinationDirectory());
         cleanCheck = new CheckBox("PULISCI DESTINAZIONE (rimuove .mp3 extra)");
         lyricsOnlyCheck = new CheckBox("COPIA SOLO FILE CON LYRICSBEGIN");
         noLyricsOnlyCheck = new CheckBox("COPIA SOLO FILE SENZA LYRICSBEGIN");
@@ -173,47 +171,24 @@ public class MidjayMp3Collector extends Application {
     }
 
     private void onStart() {
-        String origineText = sourceField.getText().trim();
-        String destinazioneText = targetField.getText().trim();
-
-        if (origineText.isEmpty() || destinazioneText.isEmpty()) {
-            alert(Alert.AlertType.WARNING, "Inserisci sia ORIGINE sia DESTINAZIONE.");
-            return;
-        }
-
-        Path src = Paths.get(origineText);
-        Path dst = Paths.get(destinazioneText);
-
-        if (!Files.isDirectory(src)) {
-            alert(Alert.AlertType.ERROR, "La cartella ORIGINE non esiste.");
-            return;
-        }
-
-        Path normalizedSource = src.toAbsolutePath().normalize();
-        Path normalizedDestination = dst.toAbsolutePath().normalize();
-        if (normalizedSource.startsWith(normalizedDestination)
-                || normalizedDestination.startsWith(normalizedSource)) {
-            alert(Alert.AlertType.ERROR, "ORIGINE e DESTINAZIONE non possono coincidere o contenersi.");
-            return;
-        }
-
+        DirectoryService.Directories directories;
         try {
-            Files.createDirectories(dst);
-        } catch (Exception ex) {
-            alert(Alert.AlertType.ERROR, "Errore creazione DESTINAZIONE: " + ex.getMessage());
+            directories = directoryService.prepare(sourceField.getText(), targetField.getText());
+        } catch (IllegalArgumentException ex) {
+            alert(Alert.AlertType.WARNING, ex.getMessage());
+            return;
+        } catch (IOException ex) {
+            alert(Alert.AlertType.ERROR, ex.getMessage());
             return;
         }
 
         saveLastUsedPaths();
-        startProcess(src, dst);
+        startProcess(directories.source(), directories.destination());
     }
 
     private void saveLastUsedPaths() {
-        if (sourceField != null) {
-            preferences.put(SOURCE_DIRECTORY_KEY, sourceField.getText().trim());
-        }
-        if (targetField != null) {
-            preferences.put(DESTINATION_DIRECTORY_KEY, targetField.getText().trim());
+        if (sourceField != null && targetField != null) {
+            directoryPreferences.save(sourceField.getText(), targetField.getText());
         }
     }
 
@@ -229,8 +204,8 @@ public class MidjayMp3Collector extends Application {
 
             @Override
             protected Void call() throws Exception {
-                Mp3CopyService service = new Mp3CopyService();
-                result = service.copy(src, dst, options, this::isCancelled, new Mp3CopyService.ProgressListener() {
+                result = copyService.copy(src, dst, options, this::isCancelled,
+                        new Mp3CopyService.ProgressListener() {
                     @Override
                     public void onStatus(String message) {
                         updateMessage(message);
@@ -363,17 +338,18 @@ public class MidjayMp3Collector extends Application {
     }
     
     private void onPrintList() {
-        String origineText = sourceField.getText().trim();
+        scanAndShowList(false);
+    }
 
-        if (origineText.isEmpty()) {
-            alert(Alert.AlertType.WARNING, "Inserisci la cartella ORIGINE.");
+    private void scanAndShowList(boolean lyricsOnly) {
+        Path source;
+        try {
+            source = directoryService.source(sourceField.getText());
+        } catch (IllegalArgumentException ex) {
+            alert(Alert.AlertType.WARNING, ex.getMessage());
             return;
-        }
-
-        Path src = Paths.get(origineText);
-
-        if (!Files.isDirectory(src)) {
-            alert(Alert.AlertType.ERROR, "La cartella ORIGINE non esiste.");
+        } catch (IOException ex) {
+            alert(Alert.AlertType.ERROR, ex.getMessage());
             return;
         }
 
@@ -381,7 +357,7 @@ public class MidjayMp3Collector extends Application {
 
             @Override
             protected String call() throws Exception {
-                return new Mp3ScanService().scanAllMp3(src);
+                return lyricsOnly ? scanService.scanMp3WithLyrics(source) : scanService.scanAllMp3(source);
             }
 
             @Override
@@ -391,7 +367,11 @@ public class MidjayMp3Collector extends Application {
 
             @Override
             protected void failed() {
-                alert(Alert.AlertType.ERROR, "Errore durante la scansione.");
+                Throwable error = getException();
+                String detail = error == null || error.getMessage() == null
+                        ? "Errore non specificato."
+                        : error.getMessage();
+                alert(Alert.AlertType.ERROR, "Errore durante la scansione: " + detail);
             }
         };
 
@@ -399,39 +379,7 @@ public class MidjayMp3Collector extends Application {
     }
     
     private void onPrintLyricsOnly() {
-        String origineText = sourceField.getText().trim();
-
-        if (origineText.isEmpty()) {
-            alert(Alert.AlertType.WARNING, "Inserisci la cartella ORIGINE.");
-            return;
-        }
-
-        Path src = Paths.get(origineText);
-
-        if (!Files.isDirectory(src)) {
-            alert(Alert.AlertType.ERROR, "La cartella ORIGINE non esiste.");
-            return;
-        }
-
-        Task<String> task = new Task<>() {
-
-            @Override
-            protected String call() throws Exception {
-                return new Mp3ScanService().scanMp3WithLyrics(src);
-            }
-
-            @Override
-            protected void succeeded() {
-                showSummaryWindow(getValue());
-            }
-
-            @Override
-            protected void failed() {
-                alert(Alert.AlertType.ERROR, "Errore durante la scansione.");
-            }
-        };
-
-        new Thread(task).start();
+        scanAndShowList(true);
     }
 
 }
