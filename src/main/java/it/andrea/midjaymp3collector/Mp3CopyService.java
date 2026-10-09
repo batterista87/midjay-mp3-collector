@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.file.DirectoryNotEmptyException;
 import java.nio.file.FileVisitResult;
 import java.nio.file.Files;
+import java.nio.file.NoSuchFileException;
 import java.nio.file.Path;
 import java.nio.file.SimpleFileVisitor;
 import java.nio.file.StandardCopyOption;
@@ -64,7 +65,10 @@ final class Mp3CopyService {
                 }
 
                 boolean hasLyrics = requiresLyricsCheck(options)
-                        && Mp3ScanService.containsLyricsBegin(file);
+                        && Mp3ScanService.containsLyricsBegin(file, cancelled);
+                if (cancelled.getAsBoolean()) {
+                    return FileVisitResult.TERMINATE;
+                }
                 if (isFiltered(options, hasLyrics)) {
                     skippedSummary.append(baseName(file)).append('\n');
                     return FileVisitResult.CONTINUE;
@@ -96,7 +100,7 @@ final class Mp3CopyService {
             removedCount = cleanDestination(sourceRoot, destinationRoot, cancelled, listener);
         }
         if (!cancelled.getAsBoolean()) {
-            cleanupEmptyDirectories(createdDirectories);
+            cleanupEmptyDirectories(createdDirectories, cancelled);
         }
 
         return new Result(copiedCount.get(), skippedDirectories.get(), removedCount,
@@ -121,7 +125,7 @@ final class Mp3CopyService {
                     return FileVisitResult.TERMINATE;
                 }
                 if (isMp3(file) && (!requiresLyricsCheck(options)
-                        || !isFiltered(options, Mp3ScanService.containsLyricsBegin(file)))) {
+                        || !isFiltered(options, Mp3ScanService.containsLyricsBegin(file, cancelled)))) {
                     count.incrementAndGet();
                 }
                 return FileVisitResult.CONTINUE;
@@ -151,7 +155,7 @@ final class Mp3CopyService {
                 if (isMp3(file)) {
                     Path relativePath = destinationRoot.relativize(file);
                     Path sourceFile = sourceRoot.resolve(relativePath);
-                    if (!Files.exists(sourceFile)) {
+                    if (isDefinitelyMissing(sourceFile)) {
                         Files.delete(file);
                         addParentDirectories(file.getParent(), normalizedDestination, affectedDirectories);
                         listener.onRemovedCount(removed.incrementAndGet());
@@ -175,6 +179,15 @@ final class Mp3CopyService {
         }
     }
 
+    private boolean isDefinitelyMissing(Path sourceFile) throws IOException {
+        try {
+            Files.readAttributes(sourceFile, BasicFileAttributes.class);
+            return false;
+        } catch (NoSuchFileException ex) {
+            return true;
+        }
+    }
+
     private void cleanupEmptyDirectories(Set<Path> directories, BooleanSupplier cancelled) throws IOException {
         for (Path directory : directories.stream()
                 .sorted(Comparator.comparingInt(Path::getNameCount).reversed())
@@ -192,27 +205,6 @@ final class Mp3CopyService {
                     } catch (DirectoryNotEmptyException ignored) {
                         // Another process added an entry after the empty-directory check.
                     }
-                }
-            }
-        }
-    }
-
-    private void cleanupEmptyDirectories(Set<Path> directories) throws IOException {
-        for (Path directory : directories.stream()
-                .sorted(Comparator.comparingInt(Path::getNameCount).reversed())
-                .toList()) {
-            if (!Files.isDirectory(directory)) {
-                continue;
-            }
-            boolean empty;
-            try (Stream<Path> entries = Files.list(directory)) {
-                empty = !entries.findAny().isPresent();
-            }
-            if (empty) {
-                try {
-                    Files.delete(directory);
-                } catch (DirectoryNotEmptyException ignored) {
-                    // Another process added an entry after the empty-directory check.
                 }
             }
         }
