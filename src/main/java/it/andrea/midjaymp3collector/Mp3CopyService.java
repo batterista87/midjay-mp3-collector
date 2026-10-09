@@ -20,6 +20,9 @@ final class Mp3CopyService {
 
     Result copy(Path sourceRoot, Path destinationRoot, Options options,
             BooleanSupplier cancelled, ProgressListener listener) throws IOException {
+        if (options.lyricsOnly() && options.noLyricsOnly()) {
+            throw new IllegalArgumentException("Seleziona al massimo un filtro LyricsBegin.");
+        }
         validateRoots(sourceRoot, destinationRoot);
 
         listener.onStatus("Conteggio file .mp3…");
