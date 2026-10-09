@@ -32,6 +32,10 @@ public class MidjayMp3Collector extends Application {
     private CheckBox cleanCheck;
     private Button startButton;
     private Button cancelButton;
+    private Button browseSourceButton;
+    private Button browseTargetButton;
+    private Button printListButton;
+    private Button printLyricsButton;
     private ProgressBar progressBar;
     private Label statusLabel;
     Label progressText;
@@ -39,7 +43,7 @@ public class MidjayMp3Collector extends Application {
     private CheckBox noLyricsOnlyCheck;
     private Label currentFileLabel;
 
-    private Task<Void> worker;
+    private Task<?> worker;
     private final DirectoryPreferences directoryPreferences = new DirectoryPreferences();
     private final DirectoryService directoryService = new DirectoryService();
     private final Mp3CopyService copyService = new Mp3CopyService();
@@ -64,11 +68,11 @@ public class MidjayMp3Collector extends Application {
         lyricsOnlyCheck = new CheckBox("COPIA SOLO FILE CON LYRICSBEGIN");
         noLyricsOnlyCheck = new CheckBox("COPIA SOLO FILE SENZA LYRICSBEGIN");
 
-        Button browseSource = new Button("[...]");
-        browseSource.setOnAction(e -> chooseDirectory(sourceField, stage));
+        browseSourceButton = new Button("[...]");
+        browseSourceButton.setOnAction(e -> chooseDirectory(sourceField, stage));
 
-        Button browseTarget = new Button("[...]");
-        browseTarget.setOnAction(e -> chooseDirectory(targetField, stage));
+        browseTargetButton = new Button("[...]");
+        browseTargetButton.setOnAction(e -> chooseDirectory(targetField, stage));
 
         startButton = new Button("Avvia");
         startButton.setOnAction(e -> onStart());
@@ -102,20 +106,20 @@ public class MidjayMp3Collector extends Application {
 
         grid.add(new Label("ORIGINE:"), 0, 0);
         grid.add(sourceField, 1, 0);
-        grid.add(browseSource, 2, 0);
+        grid.add(browseSourceButton, 2, 0);
 
         grid.add(new Label("DESTINAZIONE:"), 0, 1);
         grid.add(targetField, 1, 1);
-        grid.add(browseTarget, 2, 1);
+        grid.add(browseTargetButton, 2, 1);
 
         HBox progressBox = new HBox(12, statusLabel, progressBar, progressText);
         progressBox.setAlignment(Pos.CENTER_LEFT);
         currentFileLabel = new Label("");
         
-        Button printListButton = new Button("STAMPA LISTA");
+        printListButton = new Button("STAMPA LISTA");
         printListButton.setOnAction(e -> onPrintList());
         
-        Button printLyricsButton = new Button("STAMPA SOLO LYRICSBEGIN");
+        printLyricsButton = new Button("STAMPA SOLO LYRICSBEGIN");
         printLyricsButton.setOnAction(e -> onPrintLyricsOnly());
 
         HBox buttons = new HBox(12, startButton, cancelButton, printListButton, printLyricsButton);
@@ -240,16 +244,15 @@ public class MidjayMp3Collector extends Application {
                 progressText.textProperty().unbind();
                 progressText.setText("Completato");
 
-                if (lyricsOnlyCheck.isSelected()) {
-                    String finalSummary = result.summary();
+                String finalSummary = result.summary().isEmpty()
+                        ? "Nessun MP3 copiato."
+                        : "=== FILE COPIATI ===\n" + result.summary();
 
-                    if (!result.skippedSummary().isEmpty()) {
-                        finalSummary += "\n\n=== FILE SCARTATI ===\n" + result.skippedSummary();
-                    }
-
-                    showSummaryWindow(finalSummary);
+                if (!result.skippedSummary().isEmpty()) {
+                    finalSummary += "\n\n=== FILE SCARTATI ===\n" + result.skippedSummary();
                 }
 
+                showSummaryWindow(finalSummary);
                 finished();
             }
 
@@ -307,9 +310,13 @@ public class MidjayMp3Collector extends Application {
         cancelButton.setDisable(!busy);
         sourceField.setDisable(busy);
         targetField.setDisable(busy);
+        browseSourceButton.setDisable(busy);
+        browseTargetButton.setDisable(busy);
         cleanCheck.setDisable(busy);
         lyricsOnlyCheck.setDisable(busy);
         noLyricsOnlyCheck.setDisable(busy);
+        printListButton.setDisable(busy);
+        printLyricsButton.setDisable(busy);
     }
 
     private void alert(Alert.AlertType type, String msg) {
@@ -362,19 +369,36 @@ public class MidjayMp3Collector extends Application {
 
             @Override
             protected void succeeded() {
+                setBusy(false);
+                worker = null;
+                statusLabel.setText("Pronto.");
                 showSummaryWindow(getValue());
             }
 
             @Override
             protected void failed() {
+                setBusy(false);
+                worker = null;
+                statusLabel.setText("Errore durante la scansione.");
                 Throwable error = getException();
                 String detail = error == null || error.getMessage() == null
                         ? "Errore non specificato."
                         : error.getMessage();
                 alert(Alert.AlertType.ERROR, "Errore durante la scansione: " + detail);
             }
+
+            @Override
+            protected void cancelled() {
+                setBusy(false);
+                worker = null;
+                statusLabel.setText("Scansione annullata.");
+            }
         };
 
+        setBusy(true);
+        cancelButton.setDisable(true);
+        statusLabel.setText("Scansione in corso…");
+        worker = task;
         new Thread(task).start();
     }
     
