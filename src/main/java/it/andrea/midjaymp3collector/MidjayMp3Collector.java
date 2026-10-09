@@ -236,11 +236,13 @@ public class MidjayMp3Collector extends Application {
                     }
 
                     @Override
-                    public void onCopyProgress(int copiedCount, int totalCount) {
-                        updateProgress(copiedCount, totalCount);
-                        updateMessage("Copia in corso…");
-                        int percentage = totalCount == 0 ? 100 : (int) Math.round(copiedCount * 100.0 / totalCount);
-                        updateTitle(String.format("%d / %d (%d%%)", copiedCount, totalCount, percentage));
+                    public void onFileProgress(int processedCount, int totalCount) {
+                        updateProgress(processedCount, totalCount);
+                        updateMessage("Analisi e copia in corso…");
+                        int percentage = totalCount == 0 ? 100
+                                : (int) Math.round(processedCount * 100.0 / totalCount);
+                        updateTitle(String.format("Esaminati: %d / %d (%d%%)",
+                                processedCount, totalCount, percentage));
                     }
 
                     @Override

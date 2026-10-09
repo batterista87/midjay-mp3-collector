@@ -27,14 +27,14 @@ final class Mp3CopyService {
         validateRoots(sourceRoot, destinationRoot);
 
         listener.onStatus("Conteggio file .mp3…");
-        int totalMp3 = countEligibleMp3(sourceRoot, options, cancelled);
+        int totalMp3 = countMp3(sourceRoot, cancelled);
         if (cancelled.getAsBoolean()) {
             return new Result(0, 0, 0, 0, "", "");
         }
-
-        listener.onCopyProgress(0, totalMp3);
+        listener.onFileProgress(0, totalMp3);
 
         AtomicInteger copiedCount = new AtomicInteger();
+        AtomicInteger processedCount = new AtomicInteger();
         AtomicInteger skippedDirectories = new AtomicInteger();
         AtomicInteger filteredCount = new AtomicInteger();
         StringBuilder summary = new StringBuilder();
@@ -65,6 +65,7 @@ final class Mp3CopyService {
                     return FileVisitResult.CONTINUE;
                 }
 
+                listener.onCurrentFile(file);
                 boolean hasLyrics = requiresLyricsCheck(options) && containsLyrics(file, cancelled);
                 if (cancelled.getAsBoolean()) {
                     return FileVisitResult.TERMINATE;
@@ -72,10 +73,10 @@ final class Mp3CopyService {
                 if (isFiltered(options, hasLyrics)) {
                     filteredCount.incrementAndGet();
                     skippedSummary.append(baseName(file)).append('\n');
+                    listener.onFileProgress(processedCount.incrementAndGet(), totalMp3);
                     return FileVisitResult.CONTINUE;
                 }
 
-                listener.onCurrentFile(file);
                 Path relativePath = sourceRoot.relativize(file);
                 Path target = destinationRoot.resolve(relativePath);
                 Path parent = target.getParent();
@@ -93,14 +94,14 @@ final class Mp3CopyService {
                             + "': " + ex.getMessage(), ex);
                 }
 
-                int copied = copiedCount.incrementAndGet();
+                copiedCount.incrementAndGet();
                 Path relativeParent = relativePath.getParent();
                 if (relativeParent != null && !relativeParent.equals(lastDirectory[0])) {
                     summary.append('\n').append(relativeParent.toString().toUpperCase(Locale.ROOT)).append('\n');
                     lastDirectory[0] = relativeParent;
                 }
                 summary.append(baseName(file)).append('\n');
-                listener.onCopyProgress(copied, totalMp3);
+                listener.onFileProgress(processedCount.incrementAndGet(), totalMp3);
                 return FileVisitResult.CONTINUE;
             }
         });
@@ -118,7 +119,7 @@ final class Mp3CopyService {
                 filteredCount.get(), summary.toString(), skippedSummary.toString());
     }
 
-    private int countEligibleMp3(Path root, Options options, BooleanSupplier cancelled) throws IOException {
+    private int countMp3(Path root, BooleanSupplier cancelled) throws IOException {
         AtomicInteger count = new AtomicInteger();
 
         Files.walkFileTree(root, new SimpleFileVisitor<>() {
@@ -135,8 +136,7 @@ final class Mp3CopyService {
                 if (cancelled.getAsBoolean()) {
                     return FileVisitResult.TERMINATE;
                 }
-                if (isMp3(file) && (!requiresLyricsCheck(options)
-                        || !isFiltered(options, containsLyrics(file, cancelled)))) {
+                if (isMp3(file)) {
                     count.incrementAndGet();
                 }
                 return FileVisitResult.CONTINUE;
@@ -282,7 +282,7 @@ final class Mp3CopyService {
 
         void onCurrentFile(Path file);
 
-        void onCopyProgress(int copiedCount, int totalCount);
+        void onFileProgress(int processedCount, int totalCount);
 
         void onRemovedCount(int removedCount);
     }
