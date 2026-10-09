@@ -134,6 +134,8 @@ final class Mp3CopyService {
     private int cleanDestination(Path sourceRoot, Path destinationRoot, BooleanSupplier cancelled,
             ProgressListener listener) throws IOException {
         AtomicInteger removed = new AtomicInteger();
+        Set<Path> affectedDirectories = new HashSet<>();
+        Path normalizedDestination = destinationRoot.toAbsolutePath().normalize();
 
         Files.walkFileTree(destinationRoot, new SimpleFileVisitor<>() {
             @Override
@@ -151,6 +153,7 @@ final class Mp3CopyService {
                     Path sourceFile = sourceRoot.resolve(relativePath);
                     if (!Files.exists(sourceFile)) {
                         Files.delete(file);
+                        addParentDirectories(file.getParent(), normalizedDestination, affectedDirectories);
                         listener.onRemovedCount(removed.incrementAndGet());
                     }
                 }
@@ -159,41 +162,39 @@ final class Mp3CopyService {
         });
 
         if (!cancelled.getAsBoolean()) {
-            cleanupEmptyDirectories(destinationRoot, cancelled);
+            cleanupEmptyDirectories(affectedDirectories, cancelled);
         }
         return removed.get();
     }
 
-    private void cleanupEmptyDirectories(Path root, BooleanSupplier cancelled) throws IOException {
-        Path normalizedRoot = root.toAbsolutePath().normalize();
-        Files.walkFileTree(root, new SimpleFileVisitor<>() {
-            @Override
-            public FileVisitResult preVisitDirectory(Path directory, BasicFileAttributes attrs) {
-                return cancelled.getAsBoolean() ? FileVisitResult.TERMINATE : FileVisitResult.CONTINUE;
+    private void addParentDirectories(Path directory, Path root, Set<Path> directories) {
+        Path current = directory == null ? null : directory.toAbsolutePath().normalize();
+        while (current != null && !current.equals(root) && current.startsWith(root)) {
+            directories.add(current);
+            current = current.getParent();
+        }
+    }
+
+    private void cleanupEmptyDirectories(Set<Path> directories, BooleanSupplier cancelled) throws IOException {
+        for (Path directory : directories.stream()
+                .sorted(Comparator.comparingInt(Path::getNameCount).reversed())
+                .toList()) {
+            if (cancelled.getAsBoolean()) {
+                return;
             }
-
-            @Override
-            public FileVisitResult postVisitDirectory(Path directory, IOException error) throws IOException {
-                if (error != null) {
-                    throw error;
-                }
-                if (cancelled.getAsBoolean()
-                        || directory.toAbsolutePath().normalize().equals(normalizedRoot)) {
-                    return cancelled.getAsBoolean() ? FileVisitResult.TERMINATE : FileVisitResult.CONTINUE;
-                }
-
-                try (Stream<Path> entries = Files.list(directory)) {
-                    if (!entries.findAny().isPresent()) {
-                        try {
-                            Files.delete(directory);
-                        } catch (DirectoryNotEmptyException ignored) {
-                            // Another process added an entry after the empty-directory check.
-                        }
+            if (!Files.isDirectory(directory)) {
+                continue;
+            }
+            try (Stream<Path> entries = Files.list(directory)) {
+                if (!entries.findAny().isPresent()) {
+                    try {
+                        Files.delete(directory);
+                    } catch (DirectoryNotEmptyException ignored) {
+                        // Another process added an entry after the empty-directory check.
                     }
                 }
-                return FileVisitResult.CONTINUE;
             }
-        });
+        }
     }
 
     private void cleanupEmptyDirectories(Set<Path> directories) throws IOException {
