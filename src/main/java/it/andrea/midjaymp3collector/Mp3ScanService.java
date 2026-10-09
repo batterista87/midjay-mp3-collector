@@ -11,24 +11,31 @@ import java.nio.file.attribute.BasicFileAttributes;
 import java.util.HashSet;
 import java.util.Locale;
 import java.util.Set;
+import java.util.function.BooleanSupplier;
 
 final class Mp3ScanService {
 
     private static final byte[] LYRICS_BEGIN = "LYRICSBEGIN".getBytes(StandardCharsets.US_ASCII);
     private static final int[] LYRICS_BEGIN_PREFIX = buildPrefixTable();
 
-    String scanAllMp3(Path sourceRoot) throws IOException {
+    String scanAllMp3(Path sourceRoot, BooleanSupplier cancelled) throws IOException {
         StringBuilder list = new StringBuilder();
         Set<String> printedDirectories = new HashSet<>();
 
         Files.walkFileTree(sourceRoot, new SimpleFileVisitor<>() {
             @Override
             public FileVisitResult preVisitDirectory(Path directory, BasicFileAttributes attrs) {
+                if (cancelled.getAsBoolean()) {
+                    return FileVisitResult.TERMINATE;
+                }
                 return isExcludedDirectory(directory) ? FileVisitResult.SKIP_SUBTREE : FileVisitResult.CONTINUE;
             }
 
             @Override
             public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) {
+                if (cancelled.getAsBoolean()) {
+                    return FileVisitResult.TERMINATE;
+                }
                 if (!isMp3(file)) {
                     return FileVisitResult.CONTINUE;
                 }
@@ -41,20 +48,29 @@ final class Mp3ScanService {
         return list.toString();
     }
 
-    String scanMp3WithLyrics(Path sourceRoot) throws IOException {
+    String scanMp3WithLyrics(Path sourceRoot, BooleanSupplier cancelled) throws IOException {
         StringBuilder list = new StringBuilder();
         Set<String> printedDirectories = new HashSet<>();
 
         Files.walkFileTree(sourceRoot, new SimpleFileVisitor<>() {
             @Override
             public FileVisitResult preVisitDirectory(Path directory, BasicFileAttributes attrs) {
+                if (cancelled.getAsBoolean()) {
+                    return FileVisitResult.TERMINATE;
+                }
                 return isExcludedDirectory(directory) ? FileVisitResult.SKIP_SUBTREE : FileVisitResult.CONTINUE;
             }
 
             @Override
             public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
-                if (!isMp3(file) || !containsLyricsBegin(file)) {
-                    return FileVisitResult.CONTINUE;
+                if (cancelled.getAsBoolean()) {
+                    return FileVisitResult.TERMINATE;
+                }
+                if (!isMp3(file) || !containsLyricsBegin(file, cancelled)) {
+                    return cancelled.getAsBoolean() ? FileVisitResult.TERMINATE : FileVisitResult.CONTINUE;
+                }
+                if (cancelled.getAsBoolean()) {
+                    return FileVisitResult.TERMINATE;
                 }
 
                 appendFile(list, printedDirectories, sourceRoot.relativize(file), true);
@@ -65,12 +81,15 @@ final class Mp3ScanService {
         return list.toString();
     }
 
-    static boolean containsLyricsBegin(Path file) throws IOException {
+    static boolean containsLyricsBegin(Path file, BooleanSupplier cancelled) throws IOException {
         try (FileInputStream input = new FileInputStream(file.toFile())) {
             byte[] buffer = new byte[64 * 1024];
             int read;
             int matched = 0;
             while ((read = input.read(buffer)) != -1) {
+                if (cancelled.getAsBoolean()) {
+                    return false;
+                }
                 for (int i = 0; i < read; i++) {
                     while (matched > 0 && buffer[i] != LYRICS_BEGIN[matched]) {
                         matched = LYRICS_BEGIN_PREFIX[matched - 1];

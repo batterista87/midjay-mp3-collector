@@ -374,7 +374,9 @@ public class MidjayMp3Collector extends Application {
 
             @Override
             protected String call() throws Exception {
-                return lyricsOnly ? scanService.scanMp3WithLyrics(source) : scanService.scanAllMp3(source);
+                return lyricsOnly
+                        ? scanService.scanMp3WithLyrics(source, this::isCancelled)
+                        : scanService.scanAllMp3(source, this::isCancelled);
             }
 
             @Override
@@ -406,7 +408,6 @@ public class MidjayMp3Collector extends Application {
         };
 
         setBusy(true);
-        cancelButton.setDisable(true);
         statusLabel.setText("Scansione in corso…");
         worker = task;
         new Thread(task).start();
