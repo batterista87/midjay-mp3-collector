@@ -208,6 +208,11 @@ public class MidjayMp3Collector extends Application {
 
     private void startProcess(Path src, Path dst) {
         setBusy(true);
+        progressBar.progressProperty().unbind();
+        statusLabel.textProperty().unbind();
+        progressText.textProperty().unbind();
+        progressBar.setProgress(0);
+        progressText.setText("");
         Mp3CopyService.Options options = new Mp3CopyService.Options(
                 lyricsOnlyCheck.isSelected(),
                 noLyricsOnlyCheck.isSelected(),
@@ -259,7 +264,10 @@ public class MidjayMp3Collector extends Application {
                         : "=== FILE COPIATI ===\n" + result.summary();
 
                 if (!result.skippedSummary().isEmpty()) {
-                    finalSummary += "\n\n=== FILE SCARTATI ===\n" + result.skippedSummary();
+                    finalSummary += "\n\n=== FILE ESCLUSI DAL FILTRO ("
+                            + result.filteredCount() + ") ===\n" + result.skippedSummary();
+                } else if (result.filteredCount() > 0) {
+                    finalSummary += "\n\nFile esclusi dal filtro: " + result.filteredCount();
                 }
 
                 showSummaryWindow(finalSummary);
@@ -270,22 +278,24 @@ public class MidjayMp3Collector extends Application {
             protected void cancelled() {
                 statusLabel.textProperty().unbind();
                 progressBar.progressProperty().unbind();
-                progressBar.setProgress(1.0);
+                progressBar.setProgress(0);
                 progressText.textProperty().unbind();
                 progressText.setText("Annullato");
 
                 setBusy(false);
-                statusLabel.setText("Operazione annullata.");
-                alert(Alert.AlertType.WARNING, "Operazione annullata dall’utente.");
+                statusLabel.setText("Annullata; modifiche già eseguite mantenute.");
+                alert(Alert.AlertType.WARNING,
+                        "Operazione annullata dall’utente.\n"
+                                + "I file già copiati o rimossi non sono stati ripristinati.");
             }
 
             @Override
             protected void failed() {
                 statusLabel.textProperty().unbind();
                 progressBar.progressProperty().unbind();
-                progressBar.setProgress(1.0);
+                progressBar.setProgress(0);
                 progressText.textProperty().unbind();
-                progressText.setText("Errore");
+                progressText.setText("Non completato");
 
                 setBusy(false);
                 Throwable error = getException();
@@ -303,6 +313,7 @@ public class MidjayMp3Collector extends Application {
                         "Operazione completata.\n" +
                                 "Copiati: " + result.copiedCount() + "\n" +
                                 "Esclusi: " + result.skippedDirectories() + "\n" +
+                                "Esclusi dal filtro LyricsBegin: " + result.filteredCount() + "\n" +
                                 (cleanCheck.isSelected() ? ("Rimossi: " + result.removedCount()) : "")
                 );
             }
@@ -384,6 +395,8 @@ public class MidjayMp3Collector extends Application {
                 setBusy(false);
                 worker = null;
                 statusLabel.setText("Pronto.");
+                progressBar.setProgress(1.0);
+                progressText.setText("Completato");
                 showSummaryWindow(getValue());
             }
 
@@ -392,6 +405,8 @@ public class MidjayMp3Collector extends Application {
                 setBusy(false);
                 worker = null;
                 statusLabel.setText("Errore durante la scansione.");
+                progressBar.setProgress(0);
+                progressText.setText("Non completato");
                 Throwable error = getException();
                 String detail = error == null || error.getMessage() == null
                         ? "Errore non specificato."
@@ -404,10 +419,17 @@ public class MidjayMp3Collector extends Application {
                 setBusy(false);
                 worker = null;
                 statusLabel.setText("Scansione annullata.");
+                progressBar.setProgress(0);
+                progressText.setText("Annullato");
             }
         };
 
         setBusy(true);
+        progressBar.progressProperty().unbind();
+        statusLabel.textProperty().unbind();
+        progressText.textProperty().unbind();
+        progressBar.setProgress(-1);
+        progressText.setText("Scansione…");
         statusLabel.setText("Scansione in corso…");
         worker = task;
         new Thread(task).start();
