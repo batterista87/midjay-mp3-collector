@@ -6,6 +6,7 @@
 # === Build directories ===
 bin/
 target/
+dist/
 
 # === Java ===
 *.class
