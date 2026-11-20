@@ -12,13 +12,15 @@ import java.util.HashSet;
 import java.util.Locale;
 import java.util.Set;
 import java.util.function.BooleanSupplier;
+import java.util.function.Consumer;
 
 final class Mp3ScanService {
 
     private static final byte[] LYRICS_BEGIN = "LYRICSBEGIN".getBytes(StandardCharsets.US_ASCII);
     private static final int[] LYRICS_BEGIN_PREFIX = buildPrefixTable();
 
-    String scanAllMp3(Path sourceRoot, BooleanSupplier cancelled) throws IOException {
+    String scanAllMp3(Path sourceRoot, BooleanSupplier cancelled, Consumer<Path> onCurrentFile)
+            throws IOException {
         StringBuilder list = new StringBuilder();
         Set<String> printedDirectories = new HashSet<>();
 
@@ -42,6 +44,7 @@ final class Mp3ScanService {
                     return FileVisitResult.CONTINUE;
                 }
 
+                onCurrentFile.accept(file);
                 appendFile(list, printedDirectories, sourceRoot.relativize(file), false);
                 return FileVisitResult.CONTINUE;
             }
@@ -50,7 +53,8 @@ final class Mp3ScanService {
         return list.toString();
     }
 
-    String scanMp3WithLyrics(Path sourceRoot, BooleanSupplier cancelled) throws IOException {
+    String scanMp3WithLyrics(Path sourceRoot, BooleanSupplier cancelled, Consumer<Path> onCurrentFile)
+            throws IOException {
         StringBuilder list = new StringBuilder();
         Set<String> printedDirectories = new HashSet<>();
 
@@ -69,6 +73,9 @@ final class Mp3ScanService {
             public FileVisitResult visitFile(Path file, BasicFileAttributes attrs) throws IOException {
                 if (cancelled.getAsBoolean()) {
                     return FileVisitResult.TERMINATE;
+                }
+                if (Mp3FileRules.isMp3(file)) {
+                    onCurrentFile.accept(file);
                 }
                 if (!Mp3FileRules.isMp3(file) || !containsLyricsBegin(file, cancelled)) {
                     return cancelled.getAsBoolean() ? FileVisitResult.TERMINATE : FileVisitResult.CONTINUE;

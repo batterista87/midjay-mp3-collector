@@ -12,6 +12,8 @@ import javafx.geometry.Pos;
 import javafx.scene.Scene;
 import javafx.scene.control.Alert;
 import javafx.scene.control.Button;
+import javafx.scene.control.ButtonBar;
+import javafx.scene.control.ButtonType;
 import javafx.scene.control.CheckBox;
 import javafx.scene.control.Label;
 import javafx.scene.control.ProgressBar;
@@ -44,6 +46,7 @@ public class MidjayMp3Collector extends Application {
     private Label currentFileLabel;
 
     private Task<?> worker;
+    private boolean closingAfterCancellation;
     private final DirectoryPreferences directoryPreferences = new DirectoryPreferences();
     private final DirectoryService directoryService = new DirectoryService();
     private final Mp3CopyService copyService = new Mp3CopyService();
@@ -61,6 +64,27 @@ public class MidjayMp3Collector extends Application {
     @Override
     public void start(Stage stage) {
         stage.setTitle("Midjay MP3 Collector");
+        stage.setOnCloseRequest(event -> {
+            if (worker == null || worker.isDone()) {
+                return;
+            }
+
+            ButtonType closeButton = new ButtonType("Chiudi", ButtonBar.ButtonData.OK_DONE);
+            ButtonType stayButton = new ButtonType("Resta nell'app", ButtonBar.ButtonData.CANCEL_CLOSE);
+            Alert confirmation = new Alert(Alert.AlertType.CONFIRMATION,
+                    "È in corso un'operazione. Chiudendo verrà annullata, ma i file già copiati o rimossi "
+                            + "resteranno modificati. Vuoi chiudere comunque?",
+                    closeButton, stayButton);
+            confirmation.setTitle("Operazione in corso");
+            confirmation.setHeaderText(null);
+            confirmation.initOwner(stage);
+            if (confirmation.showAndWait().orElse(stayButton) != closeButton) {
+                event.consume();
+            } else {
+                closingAfterCancellation = true;
+                worker.cancel();
+            }
+        });
 
         sourceField = new TextField(directoryPreferences.sourceDirectory());
         targetField = new TextField(directoryPreferences.destinationDirectory());
@@ -253,8 +277,20 @@ public class MidjayMp3Collector extends Application {
                     }
 
                     @Override
-                    public void onRemovedCount(int removedCount) {
-                        updateMessage("Rimossi: " + removedCount);
+                    public void onCleanupStarted() {
+                        updateProgress(-1, 1);
+                        updateMessage("Conteggio MP3 in DESTINAZIONE…");
+                        updateTitle("");
+                    }
+
+                    @Override
+                    public void onCleanupProgress(int checkedCount, int totalCount, int removedCount) {
+                        updateProgress(checkedCount, totalCount);
+                        updateMessage("Pulizia DESTINAZIONE…");
+                        int percentage = totalCount == 0 ? 100
+                                : (int) Math.round(checkedCount * 100.0 / totalCount);
+                        updateTitle(String.format("Controllati: %d / %d (%d%%) | Rimossi: %d",
+                                checkedCount, totalCount, percentage, removedCount));
                     }
                 });
                 return null;
@@ -262,6 +298,7 @@ public class MidjayMp3Collector extends Application {
 
             @Override
             protected void succeeded() {
+                worker = null;
                 statusLabel.textProperty().unbind();
                 progressBar.progressProperty().unbind();
                 progressBar.setProgress(1.0);
@@ -285,6 +322,10 @@ public class MidjayMp3Collector extends Application {
 
             @Override
             protected void cancelled() {
+                if (closingAfterCancellation) {
+                    return;
+                }
+                worker = null;
                 statusLabel.textProperty().unbind();
                 progressBar.progressProperty().unbind();
                 progressBar.setProgress(0);
@@ -300,6 +341,7 @@ public class MidjayMp3Collector extends Application {
 
             @Override
             protected void failed() {
+                worker = null;
                 statusLabel.textProperty().unbind();
                 progressBar.progressProperty().unbind();
                 progressBar.setProgress(0);
@@ -395,8 +437,10 @@ public class MidjayMp3Collector extends Application {
             @Override
             protected String call() throws Exception {
                 return lyricsOnly
-                        ? scanService.scanMp3WithLyrics(source, this::isCancelled)
-                        : scanService.scanAllMp3(source, this::isCancelled);
+                        ? scanService.scanMp3WithLyrics(source, this::isCancelled,
+                                file -> Platform.runLater(() -> currentFileLabel.setText(file.toString())))
+                        : scanService.scanAllMp3(source, this::isCancelled,
+                                file -> {});
             }
 
             @Override
@@ -440,6 +484,7 @@ public class MidjayMp3Collector extends Application {
         progressBar.setProgress(-1);
         progressText.setText("Scansione…");
         statusLabel.setText("Scansione in corso…");
+        currentFileLabel.setText("");
         worker = task;
         new Thread(task).start();
     }

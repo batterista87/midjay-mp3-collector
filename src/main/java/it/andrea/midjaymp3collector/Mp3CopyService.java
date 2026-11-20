@@ -120,6 +120,11 @@ final class Mp3CopyService {
     }
 
     private int countMp3(Path root, BooleanSupplier cancelled) throws IOException {
+        return countMp3(root, cancelled, true);
+    }
+
+    private int countMp3(Path root, BooleanSupplier cancelled, boolean skipExcludedDirectories)
+            throws IOException {
         AtomicInteger count = new AtomicInteger();
 
         Files.walkFileTree(root, new SimpleFileVisitor<>() {
@@ -128,7 +133,7 @@ final class Mp3CopyService {
                 if (cancelled.getAsBoolean()) {
                     return FileVisitResult.TERMINATE;
                 }
-                return Mp3FileRules.isExcludedDirectory(directory)
+                return skipExcludedDirectories && Mp3FileRules.isExcludedDirectory(directory)
                         ? FileVisitResult.SKIP_SUBTREE
                         : FileVisitResult.CONTINUE;
             }
@@ -150,9 +155,17 @@ final class Mp3CopyService {
 
     private int cleanDestination(Path sourceRoot, Path destinationRoot, BooleanSupplier cancelled,
             ProgressListener listener) throws IOException {
+        listener.onCleanupStarted();
+        int totalMp3 = countMp3(destinationRoot, cancelled, false);
+        if (cancelled.getAsBoolean()) {
+            return 0;
+        }
+
         AtomicInteger removed = new AtomicInteger();
+        AtomicInteger checked = new AtomicInteger();
         Set<Path> affectedDirectories = new HashSet<>();
         Path normalizedDestination = destinationRoot.toAbsolutePath().normalize();
+        listener.onCleanupProgress(0, totalMp3, 0);
 
         Files.walkFileTree(destinationRoot, new SimpleFileVisitor<>() {
             @Override
@@ -166,6 +179,7 @@ final class Mp3CopyService {
                     return FileVisitResult.TERMINATE;
                 }
                 if (Mp3FileRules.isMp3(file)) {
+                    listener.onCurrentFile(file);
                     Path relativePath = destinationRoot.relativize(file);
                     Path sourceFile = sourceRoot.resolve(relativePath);
                     if (isDefinitelyMissing(sourceFile)) {
@@ -176,8 +190,9 @@ final class Mp3CopyService {
                                     + "': " + ex.getMessage(), ex);
                         }
                         addParentDirectories(file.getParent(), normalizedDestination, affectedDirectories);
-                        listener.onRemovedCount(removed.incrementAndGet());
+                        removed.incrementAndGet();
                     }
+                    listener.onCleanupProgress(checked.incrementAndGet(), totalMp3, removed.get());
                 }
                 return FileVisitResult.CONTINUE;
             }
@@ -275,6 +290,8 @@ final class Mp3CopyService {
 
         void onFileProgress(int processedCount, int totalCount);
 
-        void onRemovedCount(int removedCount);
+        void onCleanupStarted();
+
+        void onCleanupProgress(int checkedCount, int totalCount, int removedCount);
     }
 }
